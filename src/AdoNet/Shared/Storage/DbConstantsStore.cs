@@ -21,7 +21,8 @@ namespace Orleans.Tests.SqlUtils
             {
                 {
                     AdoNetInvariants.InvariantNameSqlServer,
-                    new DbConstants(startEscapeIndicator: '[',
+                        new DbConstants(
+                                    startEscapeIndicator: '[',
                                     endEscapeIndicator: ']',
                                     unionAllSelectTemplate: " UNION ALL SELECT ",
                                     isSynchronousAdoNetImplementation: false,
@@ -29,7 +30,9 @@ namespace Orleans.Tests.SqlUtils
                                     supportsCommandCancellation: true,
                                     commandInterceptor: NoOpCommandInterceptor.Instance)
                 },
-                {AdoNetInvariants.InvariantNameMySql, new DbConstants(
+                {
+                    AdoNetInvariants.InvariantNameMySql,
+                        new DbConstants(
                                     startEscapeIndicator: '`',
                                     endEscapeIndicator: '`',
                                     unionAllSelectTemplate: " UNION ALL SELECT ",
@@ -38,7 +41,9 @@ namespace Orleans.Tests.SqlUtils
                                     supportsCommandCancellation: false,
                                     commandInterceptor: NoOpCommandInterceptor.Instance)
                 },
-                {AdoNetInvariants.InvariantNamePostgreSql, new DbConstants(
+                {
+                    AdoNetInvariants.InvariantNamePostgreSql,
+                        new DbConstants(
                                     startEscapeIndicator: '"',
                                     endEscapeIndicator: '"',
                                     unionAllSelectTemplate: " UNION ALL SELECT ",
@@ -46,9 +51,10 @@ namespace Orleans.Tests.SqlUtils
                                     supportsStreamNatively: true,
                                     supportsCommandCancellation: true, // See https://dev.mysql.com/doc/connector-net/en/connector-net-ref-mysqlclient-mysqlcommandmembers.html.
                                     commandInterceptor: NoOpCommandInterceptor.Instance)
-
                 },
-                {AdoNetInvariants.InvariantNameOracleDatabase, new DbConstants(
+                {
+                    AdoNetInvariants.InvariantNameOracleDatabase,
+                        new DbConstants(
                                     startEscapeIndicator: '\"',
                                     endEscapeIndicator: '\"',
                                     unionAllSelectTemplate: " FROM DUAL UNION ALL SELECT ",
@@ -56,11 +62,10 @@ namespace Orleans.Tests.SqlUtils
                                     supportsStreamNatively: false,
                                     supportsCommandCancellation: false, // Is supported but the remarks sound scary: https://docs.oracle.com/cd/E11882_01/win.112/e23174/OracleCommandClass.htm#DAFIEHHG.
                                     commandInterceptor: OracleCommandInterceptor.Instance)
-
                 },
                 {
                     AdoNetInvariants.InvariantNameSqlServerDotnetCore,
-                    new DbConstants(startEscapeIndicator: '[',
+                        new DbConstants(startEscapeIndicator: '[',
                                     endEscapeIndicator: ']',
                                     unionAllSelectTemplate: " UNION ALL SELECT ",
                                     isSynchronousAdoNetImplementation: false,
@@ -68,9 +73,19 @@ namespace Orleans.Tests.SqlUtils
                                     supportsCommandCancellation: true,
                                     commandInterceptor: NoOpCommandInterceptor.Instance)
                 },
+                 {
+                    AdoNetInvariants.InvariantNameSqlLite,
+                        new DbConstants(startEscapeIndicator: '[',
+                                    endEscapeIndicator: ']',
+                                    unionAllSelectTemplate: " UNION ALL SELECT ",
+                                    isSynchronousAdoNetImplementation: false,
+                                    supportsStreamNatively: false,
+                                    supportsCommandCancellation: true,
+                                    commandInterceptor: NoOpCommandInterceptor.Instance)
+                },
                 {
                     AdoNetInvariants.InvariantNameMySqlConnector,
-                    new DbConstants(startEscapeIndicator: '[',
+                        new DbConstants(startEscapeIndicator: '[',
                                     endEscapeIndicator: ']',
                                     unionAllSelectTemplate: " UNION ALL SELECT ",
                                     isSynchronousAdoNetImplementation: false,
