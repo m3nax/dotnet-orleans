@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="$(SourceRoot)src\EFCore\Orleans.Clustering.EntityFrameworkCore\Orleans.Clustering.EntityFrameworkCore.csproj"/>
+    <ProjectReference Include="$(SourceRoot)src\EFCore\Orleans.Clustering.EntityFrameworkCore\Orleans.Clustering.EntityFrameworkCore.csproj" />
   </ItemGroup>
 
 </Project>

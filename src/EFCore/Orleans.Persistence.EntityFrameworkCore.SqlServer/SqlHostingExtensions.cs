@@ -4,10 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Orleans.Hosting;
 using Orleans.Persistence.EntityFrameworkCore;
+using Orleans.Persistence.EntityFrameworkCore.SqlServer.Data;
+using Orleans.Providers;
 using Orleans.Runtime;
 using Orleans.Storage;
-using Orleans.Providers;
-using Orleans.Persistence.EntityFrameworkCore.SqlServer.Data;
 
 namespace Orleans.Persistence;
 
@@ -100,8 +100,9 @@ public static class SqlHostingExtensions
         string name)
     {
         services.AddSingleton<IEFGrainStorageETagConverter<byte[]>, SqlServerGrainStateETagConverter>();
-        services.TryAddSingleton(sp => sp.GetServiceByName<IGrainStorage>(ProviderConstants.DEFAULT_STORAGE_PROVIDER_NAME));
-        return services.AddSingletonNamedService(name, EFStorageFactory.Create<SqlServerGrainStateDbContext, byte[]>)
-            .AddSingletonNamedService(name, (s, n) => (ILifecycleParticipant<ISiloLifecycle>)s.GetRequiredServiceByName<IGrainStorage>(n));
+        services.TryAddSingleton(sp => sp.GetRequiredKeyedService<IGrainStorage>(ProviderConstants.DEFAULT_STORAGE_PROVIDER_NAME));
+        return services
+            .AddKeyedSingleton(name, EFStorageFactory.Create<SqlServerGrainStateDbContext, byte[]>)
+            .AddKeyedSingleton(name, (s, n) => (ILifecycleParticipant<ISiloLifecycle>)s.GetRequiredKeyedService<IGrainStorage>(n));
     }
 }
