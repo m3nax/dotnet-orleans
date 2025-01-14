@@ -43,16 +43,6 @@ namespace Orleans
                 participant?.Participate(_clusterClientLifecycle);
             }
 
-            // register all named lifecycle participants
-            var namedLifecycleParticipantCollection = ServiceProvider.GetService<IKeyedServiceCollection<string, ILifecycleParticipant<IClusterClientLifecycle>>>();
-            if (namedLifecycleParticipantCollection?.GetServices(ServiceProvider)?.Select(s => s.GetService(ServiceProvider)) is { } namedParticipants)
-            {
-                foreach (var participant in namedParticipants)
-                {
-                    participant.Participate(_clusterClientLifecycle);
-                }
-            }
-
             static void ValidateSystemConfiguration(IServiceProvider serviceProvider)
             {
                 var validators = serviceProvider.GetServices<IConfigurationValidator>();
@@ -69,7 +59,7 @@ namespace Orleans
         /// <inheritdoc />
         public async Task StartAsync(CancellationToken cancellationToken)
         {
-            await _runtimeClient.Start(cancellationToken).ConfigureAwait(false);
+            await _runtimeClient.StartAsync(cancellationToken).ConfigureAwait(false);
             await _clusterClientLifecycle.OnStart(cancellationToken).ConfigureAwait(false);
         }
 
@@ -81,8 +71,7 @@ namespace Orleans
                 _logger.LogInformation("Client shutting down");
 
                 await _clusterClientLifecycle.OnStop(cancellationToken).ConfigureAwait(false);
-
-                _runtimeClient?.Reset();
+                await _runtimeClient.StopAsync(cancellationToken).WaitAsync(cancellationToken);
             }
             finally
             {

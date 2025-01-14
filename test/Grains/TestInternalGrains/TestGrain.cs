@@ -61,12 +61,13 @@ namespace UnitTests.Grains
         public Task StartTimer()
         {
             logger.LogInformation("StartTimer.");
-            timer = base.RegisterTimer(TimerTick, null, TimeSpan.Zero, TimeSpan.FromSeconds(10));
+            timer = this.RegisterGrainTimer(TimerTick, dueTime: TimeSpan.Zero, period: TimeSpan.FromSeconds(10));
 
             return Task.CompletedTask;
         }
+        private Task Ticker(object obj) => Task.CompletedTask;
 
-        private Task TimerTick(object data)
+        private Task TimerTick(CancellationToken cancellationToken)
         {
             logger.LogInformation("TimerTick.");
             return Task.CompletedTask;
@@ -152,6 +153,7 @@ namespace UnitTests.Grains
         }
     }
 
+    [GrainType("guid-test-grain")]
     internal class GuidTestGrain : Grain, IGuidTestGrain
     {
         private readonly string _id = Guid.NewGuid().ToString();
@@ -200,6 +202,8 @@ namespace UnitTests.Grains
         {
             return Task.FromResult(_id);
         }
+
+        public Task<SiloAddress> GetSiloAddress() => Task.FromResult(ServiceProvider.GetRequiredService<ILocalSiloDetails>().SiloAddress);
     }
 
     internal class OneWayGrain : Grain, IOneWayGrain, ISimpleGrainObserver

@@ -106,6 +106,33 @@ namespace NonSilo.Tests
         }
 
         /// <summary>
+        /// ClusterMembershipOptions.NumProbedSilos must be greater than ClusterMembershipOptions.NumVotesForDeathDeclaration.
+        /// </summary>
+        [Fact]
+        public async Task SiloBuilder_ClusterMembershipOptionsValidators()
+        {
+            await Assert.ThrowsAsync<OrleansConfigurationException>(async () =>
+            {
+                await new HostBuilder().UseOrleans((ctx, siloBuilder) =>
+                {
+                    siloBuilder
+                        .UseLocalhostClustering()
+                        .Configure<ClusterMembershipOptions>(options => { options.NumVotesForDeathDeclaration = 10; options.NumProbedSilos = 1; });
+                }).RunConsoleAsync();
+            });
+
+            await Assert.ThrowsAsync<OrleansConfigurationException>(async () =>
+            {
+                await new HostBuilder().UseOrleans((ctx, siloBuilder) =>
+                {
+                    siloBuilder
+                        .UseLocalhostClustering()
+                        .Configure<ClusterMembershipOptions>(options => { options.NumVotesForDeathDeclaration = 0; });
+                }).RunConsoleAsync();
+            });
+        }
+
+        /// <summary>
         /// Ensures <see cref="LoadSheddingValidator"/> fails when LoadSheddingLimit greater than 100.
         /// </summary>
         [Fact]
@@ -123,42 +150,14 @@ namespace NonSilo.Tests
                         .Configure<LoadSheddingOptions>(options =>
                         {
                             options.LoadSheddingEnabled = true;
-                            options.LoadSheddingLimit = 101;
+                            options.CpuThreshold = 101;
                         })
                         .ConfigureServices(svcCollection =>
                         {
-                            svcCollection.AddSingleton<FakeHostEnvironmentStatistics>();
-                            svcCollection.AddFromExisting<IHostEnvironmentStatistics, FakeHostEnvironmentStatistics>();
+                            svcCollection.AddSingleton<FakeEnvironmentStatisticsProvider>();
+                            svcCollection.AddFromExisting<IEnvironmentStatisticsProvider, FakeEnvironmentStatisticsProvider>();
                             svcCollection.AddTransient<IConfigurationValidator, LoadSheddingValidator>();
                         });
-                }).RunConsoleAsync();
-            });
-        }
-
-        /// <summary>
-        /// Ensures <see cref="LoadSheddingValidator"/> fails validation when invalid/no instance of
-        /// <see cref="IHostEnvironmentStatistics"/> is registered using otherwise valid <see cref="LoadSheddingOptions"/>.
-        /// </summary>
-        [Fact]
-        public async Task SiloBuilder_LoadSheddingValidatorFailsWithNoRegisteredHostEnvironmentStatistics()
-        {
-            await Assert.ThrowsAsync<OrleansConfigurationException>(async () =>
-            {
-                await new HostBuilder().UseOrleans((ctx, siloBuilder) =>
-                {
-                    siloBuilder
-                      .UseLocalhostClustering()
-                      .Configure<ClusterOptions>(options => options.ClusterId = "someClusterId")
-                      .Configure<EndpointOptions>(options => options.AdvertisedIPAddress = IPAddress.Loopback)
-                      .ConfigureServices(services => services.AddSingleton<IMembershipTable, NoOpMembershipTable>())
-                      .Configure<LoadSheddingOptions>(options =>
-                      {
-                          options.LoadSheddingEnabled = true;
-                          options.LoadSheddingLimit = 95;
-                      }).ConfigureServices(svcCollection =>
-                      {
-                          svcCollection.AddTransient<IConfigurationValidator, LoadSheddingValidator>();
-                      });
                 }).RunConsoleAsync();
             });
         }
@@ -215,13 +214,9 @@ namespace NonSilo.Tests
             });
         }
 
-        private class FakeHostEnvironmentStatistics : IHostEnvironmentStatistics
+        private class FakeEnvironmentStatisticsProvider : IEnvironmentStatisticsProvider
         {
-            public long? TotalPhysicalMemory => 0;
-
-            public float? CpuUsage => 0;
-
-            public long? AvailableMemory => 0;
+            public EnvironmentStatistics GetEnvironmentStatistics() => new();
         }
 
         private class MyService

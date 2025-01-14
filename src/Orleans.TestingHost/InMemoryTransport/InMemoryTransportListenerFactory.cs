@@ -22,9 +22,9 @@ internal static class InMemoryTransportExtensions
     {
         siloBuilder.ConfigureServices(services =>
         {
-            services.AddSingletonKeyedService<object, IConnectionFactory>(SiloConnectionFactory.ServicesKey, CreateInMemoryConnectionFactory(hub));
-            services.AddSingletonKeyedService<object, IConnectionListenerFactory>(SiloConnectionListener.ServicesKey, CreateInMemoryConnectionListenerFactory(hub));
-            services.AddSingletonKeyedService<object, IConnectionListenerFactory>(GatewayConnectionListener.ServicesKey, CreateInMemoryConnectionListenerFactory(hub));
+            services.AddKeyedSingleton<IConnectionFactory>(SiloConnectionFactory.ServicesKey, CreateInMemoryConnectionFactory(hub));
+            services.AddKeyedSingleton<IConnectionListenerFactory>(SiloConnectionListener.ServicesKey, CreateInMemoryConnectionListenerFactory(hub));
+            services.AddKeyedSingleton<IConnectionListenerFactory>(GatewayConnectionListener.ServicesKey, CreateInMemoryConnectionListenerFactory(hub));
         });
 
         return siloBuilder;
@@ -34,7 +34,7 @@ internal static class InMemoryTransportExtensions
     {
         clientBuilder.ConfigureServices(services =>
         {
-            services.AddSingletonKeyedService<object, IConnectionFactory>(ClientOutboundConnectionFactory.ServicesKey, CreateInMemoryConnectionFactory(hub));
+            services.AddKeyedSingleton<IConnectionFactory>(ClientOutboundConnectionFactory.ServicesKey, CreateInMemoryConnectionFactory(hub));
         });
 
         return clientBuilder;
@@ -194,7 +194,7 @@ internal class InMemoryTransportConnectionFactory : IConnectionFactory
             _loggerFactory.CreateLogger<InMemoryTransportConnection>(),
             _localEndpoint,
             endpoint);
-        await listener.ConnectAsync(connectionContext).WithCancellation(cancellationToken);
+        await listener.ConnectAsync(connectionContext).WaitAsync(cancellationToken);
         return connectionContext;
     }
 }

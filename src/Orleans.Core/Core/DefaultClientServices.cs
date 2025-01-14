@@ -1,3 +1,4 @@
+#nullable enable
 using Orleans.Configuration;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,7 +19,13 @@ using Orleans.Statistics;
 using Orleans.Serialization.Serializers;
 using Orleans.Serialization.Cloning;
 using Microsoft.Extensions.Hosting;
-using System.Runtime.InteropServices;
+using System.Collections.Generic;
+using Orleans.Serialization.Internal;
+using System;
+using Orleans.Hosting;
+using System.Reflection;
+using Microsoft.Extensions.Configuration;
+using Orleans.Placement.Repartitioning;
 
 namespace Orleans
 {
@@ -32,15 +39,21 @@ namespace Orleans
         /// <summary>
         /// Configures the default services for a client.
         /// </summary>
-        /// <param name="services">The service collection.</param>
-        public static void AddDefaultServices(IServiceCollection services)
+        /// <param name="builder">The client builder.</param>
+        public static void AddDefaultServices(IClientBuilder builder)
         {
+            var services = builder.Services;
             if (services.Contains(ServiceDescriptor))
             {
                 return;
             }
 
             services.Add(ServiceDescriptor);
+
+            // Common services
+            services.AddLogging();
+            services.AddOptions();
+            services.TryAddSingleton<TimeProvider>(TimeProvider.System);
 
             // Options logging
             services.TryAddSingleton(typeof(IOptionFormatter<>), typeof(DefaultOptionsFormatter<>));
@@ -49,20 +62,20 @@ namespace Orleans
             services.AddSingleton<ClientOptionsLogger>();
             services.AddFromExisting<ILifecycleParticipant<IClusterClientLifecycle>, ClientOptionsLogger>();
 
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-            {
-                LinuxEnvironmentStatisticsServices.RegisterServices<IClusterClientLifecycle>(services);
-            }
-            else
-            {
-                services.TryAddSingleton<IHostEnvironmentStatistics, NoOpHostEnvironmentStatistics>();
-            }
+            // Statistics
+            services.AddSingleton<IEnvironmentStatisticsProvider, EnvironmentStatisticsProvider>();
+#pragma warning disable 618
+            services.AddSingleton<OldEnvironmentStatistics>();
+            services.AddFromExisting<IAppEnvironmentStatistics, OldEnvironmentStatistics>();
+            services.AddFromExisting<IHostEnvironmentStatistics, OldEnvironmentStatistics>();
+#pragma warning restore 618
 
-            services.TryAddSingleton<IAppEnvironmentStatistics, AppEnvironmentStatistics>();
-            services.AddLogging();
             services.TryAddSingleton<GrainBindingsResolver>();
+            services.TryAddSingleton<LocalClientDetails>();
             services.TryAddSingleton<OutsideRuntimeClient>();
+            services.TryAddSingleton<InterfaceToImplementationMappingCache>();
             services.TryAddSingleton<ClientGrainContext>();
+            services.AddSingleton<IClusterConnectionStatusObserver, ClusterConnectionStatusObserverAdaptor>();
             services.AddFromExisting<IGrainContextAccessor, ClientGrainContext>();
             services.TryAddFromExisting<IRuntimeClient, OutsideRuntimeClient>();
             services.TryAddFromExisting<IClusterConnectionStatusListener, OutsideRuntimeClient>();
@@ -85,9 +98,9 @@ namespace Orleans
             services.TryAddFromExisting<IInternalClusterClient, ClusterClient>();
             services.AddFromExisting<IHostedService, ClusterClient>();
             services.AddTransient<IOptions<MessagingOptions>>(static sp => sp.GetRequiredService<IOptions<ClientMessagingOptions>>());
+            services.TryAddSingleton<IClientConnectionRetryFilter, LinearBackoffClientConnectionRetryFilter>();
 
             services.AddSingleton<IConfigureOptions<GrainTypeOptions>, DefaultGrainTypeOptionsProvider>();
-            services.TryAddSingleton(typeof(IKeyedServiceCollection<,>), typeof(KeyedServiceCollection<,>));
 
             // Add default option formatter if none is configured, for options which are required to be configured
             services.ConfigureFormatter<ClusterOptions>();
@@ -104,12 +117,13 @@ namespace Orleans
             services.AddSingleton<SharedMemoryPool>();
 
             // Networking
+            services.TryAddSingleton<IMessageStatisticsSink, NoOpMessageStatisticsSink>();
             services.TryAddSingleton<ConnectionCommon>();
             services.TryAddSingleton<ConnectionManager>();
             services.TryAddSingleton<ConnectionPreambleHelper>();
             services.AddSingleton<ILifecycleParticipant<IClusterClientLifecycle>, ConnectionManagerLifecycleAdapter<IClusterClientLifecycle>>();
 
-            services.AddSingletonKeyedService<object, IConnectionFactory>(
+            services.AddKeyedSingleton<IConnectionFactory>(
                 ClientOutboundConnectionFactory.ServicesKey,
                 (sp, key) => ActivatorUtilities.CreateInstance<SocketConnectionFactory>(sp));
 
@@ -147,6 +161,96 @@ namespace Orleans
             services.AddSingleton<IGrainInterfacePropertiesProvider, TypeNameGrainPropertiesProvider>();
             services.AddSingleton<IGrainPropertiesProvider, TypeNameGrainPropertiesProvider>();
             services.AddSingleton<IGrainPropertiesProvider, ImplementedInterfaceProvider>();
+
+            ApplyConfiguration(builder);
+        }
+
+        private static void ApplyConfiguration(IClientBuilder builder)
+        {
+            var services = builder.Services;
+            var cfg = builder.Configuration.GetSection("Orleans");
+            var knownProviderTypes = GetRegisteredProviders();
+
+            services.Configure<ClusterOptions>(cfg);
+            services.Configure<ClientMessagingOptions>(cfg.GetSection("Messaging"));
+            services.Configure<GatewayOptions>(cfg.GetSection("Gateway"));
+
+            if (bool.TryParse(cfg["EnableDistributedTracing"], out var enableDistributedTracing) && enableDistributedTracing)
+            {
+                builder.AddActivityPropagation();
+            }
+
+            ApplySubsection(builder, cfg, knownProviderTypes, "Clustering");
+            ApplySubsection(builder, cfg, knownProviderTypes, "Reminders");
+            ApplyNamedSubsections(builder, cfg, knownProviderTypes, "BroadcastChannel");
+            ApplyNamedSubsections(builder, cfg, knownProviderTypes, "Streaming");
+            ApplyNamedSubsections(builder, cfg, knownProviderTypes, "GrainStorage");
+            ApplyNamedSubsections(builder, cfg, knownProviderTypes, "GrainDirectory");
+
+            static void ConfigureProvider(
+                IClientBuilder builder,
+                Dictionary<(string Kind, string Name), Type> knownProviderTypes,
+                string kind,
+                string? name,
+                IConfigurationSection configurationSection)
+            {
+                var providerType = configurationSection["ProviderType"] ?? "Default";
+                var provider = GetRequiredProvider(knownProviderTypes, kind, providerType);
+                provider.Configure(builder, name, configurationSection);
+            }
+
+            static IProviderBuilder<IClientBuilder> GetRequiredProvider(Dictionary<(string Kind, string Name), Type> knownProviderTypes, string kind, string name)
+            {
+                if (knownProviderTypes.TryGetValue((kind, name), out var type))
+                {
+                    var instance = Activator.CreateInstance(type);
+                    return instance as IProviderBuilder<IClientBuilder>
+                        ?? throw new InvalidOperationException($"{kind} provider, '{name}', of type {type}, does not implement {typeof(IProviderBuilder<IClientBuilder>)}.");
+                }
+
+                throw new InvalidOperationException($"Could not find {kind} provider named '{name}'. This can indicate that either the 'Microsoft.Orleans.Sdk' package the provider's package are not referenced by your application.");
+            }
+
+            static Dictionary<(string Kind, string Name), Type> GetRegisteredProviders()
+            {
+                var result = new Dictionary<(string, string), Type>();
+                foreach (var asm in ReferencedAssemblyProvider.GetRelevantAssemblies())
+                {
+                    foreach (var attr in asm.GetCustomAttributes<RegisterProviderAttribute>())
+                    {
+                        if (string.Equals(attr.Target, "Client"))
+                        {
+                            result[(attr.Kind, attr.Name)] = attr.Type;
+                        }
+                    }
+                }
+
+                return result;
+            }
+
+            static void ApplySubsection(IClientBuilder builder, IConfigurationSection cfg, Dictionary<(string Kind, string Name), Type> knownProviderTypes, string sectionName)
+            {
+                if (cfg.GetSection(sectionName) is { } section && section.Exists())
+                {
+                    ConfigureProvider(builder, knownProviderTypes, sectionName, name: null, section);
+                }
+            }
+
+            static void ApplyNamedSubsections(IClientBuilder builder, IConfigurationSection cfg, Dictionary<(string Kind, string Name), Type> knownProviderTypes, string sectionName)
+            {
+                if (cfg.GetSection(sectionName) is { } section && section.Exists())
+                {
+                    foreach (var child in section.GetChildren())
+                    {
+                        ConfigureProvider(builder, knownProviderTypes, sectionName, name: child.Key, child);
+                    }
+                }
+            }
+        }
+
+        internal partial class RootConfiguration
+        {
+            public IConfigurationSection? Clustering { get; set; }
         }
 
         /// <summary>

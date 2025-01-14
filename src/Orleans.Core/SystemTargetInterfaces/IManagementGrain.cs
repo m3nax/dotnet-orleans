@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Orleans.Providers;
 
 namespace Orleans.Runtime
 {
@@ -98,14 +99,13 @@ namespace Orleans.Runtime
         /// Providers must implement the <c>Orleans.Providers.IControllable</c>
         /// interface in order to receive these control channel commands.
         /// </remarks>
-        /// <param name="providerTypeFullName">Class full name for the provider type to send this command to.</param>
         /// <param name="providerName">Provider name to send this command to.</param>
         /// <param name="command">An id / serial number of this command.
         /// This is an opaque value to the Orleans runtime - the control protocol semantics are decided between the sender and provider.</param>
         /// <param name="arg">An opaque command argument.
         /// This is an opaque value to the Orleans runtime - the control protocol semantics are decided between the sender and provider.</param>
         /// <returns>Completion promise for this operation.</returns>
-        Task<object[]> SendControlCommandToProvider(string providerTypeFullName, string providerName, int command, object arg = null);
+        public Task<object[]> SendControlCommandToProvider<T>(string providerName, int command, object arg = null) where T : IControllable;
 
         /// <summary>
         /// Return the <see cref="Orleans.Runtime.SiloAddress"/> where a given Grain is activated (if any).
@@ -124,5 +124,61 @@ namespace Orleans.Runtime
         /// <param name="type">The type.</param>
         /// <returns>A list of all active grains of the specified type.</returns>
         ValueTask<List<GrainId>> GetActiveGrains(GrainType type);
+
+        /// <summary>
+        /// Gets estimated grain call frequency statistics from the specified hosts.
+        /// </summary>
+        /// <param name="hostsIds">The hosts to request grain call frequency counts from.</param>
+        /// <returns>A list of estimated grain call frequencies.</returns>
+        /// <remarks>
+        /// Note that this resulting collection does not necessarily contain all grain calls. It contains an estimation of the calls with the highest frequency.
+        /// </remarks>
+        Task<List<GrainCallFrequency>> GetGrainCallFrequencies(SiloAddress[] hostsIds = null);
+
+        /// <summary>
+        /// For testing only. Resets grain call frequency counts on the specified hosts.
+        /// </summary>
+        /// <param name="hostsIds">The hosts to invoke the operation on.</param>
+        /// <returns>A task representing the work performed.</returns>
+        ValueTask ResetGrainCallFrequencies(SiloAddress[] hostsIds = null);
+    }
+
+    /// <summary>
+    /// Represents an estimation of the frequency calls made from a source grain to a target grain.
+    /// </summary>
+    [GenerateSerializer]
+    [Alias("Orleans.Runtime.GrainCallFrequency")]
+    [Immutable]
+    public struct GrainCallFrequency
+    {
+        /// <summary>
+        /// The source grain.
+        /// </summary>
+        [Id(0)]
+        public GrainId SourceGrain { get; set; }
+
+        /// <summary>
+        /// The target grain.
+        /// </summary>
+        [Id(1)]
+        public GrainId TargetGrain { get; set; }
+
+        /// <summary>
+        /// The source host.
+        /// </summary>
+        [Id(2)]
+        public SiloAddress SourceHost { get; set; }
+
+        /// <summary>
+        /// The target host.
+        /// </summary>
+        [Id(3)]
+        public SiloAddress TargetHost { get; set; }
+
+        /// <summary>
+        /// The estimated number of calls made.
+        /// </summary>
+        [Id(4)]
+        public ulong CallCount { get; set; }
     }
 }

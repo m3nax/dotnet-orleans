@@ -18,7 +18,7 @@ namespace DefaultCluster.Tests.General
         private readonly bool[] callbacksReceived = new bool[2];
 
         // we keep the observer objects as instance variables to prevent them from
-        // being garbage collected permaturely (the runtime stores them as weak references).
+        // being garbage collected prematurely (the runtime stores them as weak references).
         private SimpleGrainObserver observer1;
         private SimpleGrainObserver observer2;
 
@@ -131,7 +131,7 @@ namespace DefaultCluster.Tests.General
                 Assert.IsAssignableFrom<OrleansException>(baseException);
                 if (!baseException.Message.StartsWith("Cannot subscribe already subscribed observer"))
                 {
-                    Assert.True(false, "Unexpected exception message: " + baseException);
+                    Assert.Fail("Unexpected exception message: " + baseException);
                 }
             }
 

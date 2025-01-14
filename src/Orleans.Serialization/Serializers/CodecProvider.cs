@@ -434,7 +434,14 @@ namespace Orleans.Serialization.Serializers
 
             if (!_activators.TryGetValue(searchType, out var activatorType))
             {
-                activatorType = typeof(DefaultActivator<>).MakeGenericType(concreteType);
+                if (searchType.IsValueType)
+                {
+                    activatorType = typeof(DefaultValueTypeActivator<>).MakeGenericType(concreteType);
+                }
+                else
+                {
+                    activatorType = typeof(DefaultReferenceTypeActivator<>).MakeGenericType(concreteType);
+                }
             }
             else if (activatorType.IsGenericTypeDefinition)
             {
@@ -563,7 +570,8 @@ namespace Orleans.Serialization.Serializers
                 var converterInterfaceArgs = Array.Empty<Type>();
                 foreach (var @interface in converterType.GetInterfaces())
                 {
-                    if (@interface.IsConstructedGenericType && @interface.GetGenericTypeDefinition() == typeof(IConverter<,>))
+                    if (@interface.IsConstructedGenericType && @interface.GetGenericTypeDefinition() == typeof(IConverter<,>)
+                        && @interface.GenericTypeArguments[0] == fieldType)
                     {
                         converterInterfaceArgs = @interface.GetGenericArguments();
                     }

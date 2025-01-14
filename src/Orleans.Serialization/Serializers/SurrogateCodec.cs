@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
@@ -24,7 +25,7 @@ public sealed class SurrogateCodec<TField, TSurrogate, TConverter>
     private readonly Type _fieldType = typeof(TField);
     private readonly IValueSerializer<TSurrogate> _surrogateSerializer;
     private readonly IDeepCopier<TSurrogate> _surrogateCopier;
-    private readonly IPopulator<TField, TSurrogate> _populator;
+    private readonly IPopulator<TField, TSurrogate>? _populator;
     private readonly TConverter _converter;
 
     /// <summary>
@@ -71,11 +72,22 @@ public sealed class SurrogateCodec<TField, TSurrogate, TConverter>
         if (field.FieldType is null || field.FieldType == _fieldType)
         {
             field.EnsureWireTypeTagDelimited();
-            var placeholderReferenceId = ReferenceCodec.CreateRecordPlaceholder(reader.Session);
+
+            uint placeholderReferenceId = default;
+            if (IsReferenceTrackingSupported)
+            {
+                placeholderReferenceId = ReferenceCodec.CreateRecordPlaceholder(reader.Session);
+            }
+
             TSurrogate surrogate = default;
             _surrogateSerializer.Deserialize(ref reader, ref surrogate);
             var result = _converter.ConvertFromSurrogate(in surrogate);
-            ReferenceCodec.RecordObject(reader.Session, result, placeholderReferenceId);
+
+            if (IsReferenceTrackingSupported)
+            {
+                ReferenceCodec.RecordObject(reader.Session, result, placeholderReferenceId);
+            }
+
             return result;
         }
 
@@ -85,7 +97,7 @@ public sealed class SurrogateCodec<TField, TSurrogate, TConverter>
     /// <inheritdoc/>
     public void WriteField<TBufferWriter>(ref Writer<TBufferWriter> writer, uint fieldIdDelta, Type expectedType, TField value) where TBufferWriter : IBufferWriter<byte>
     {
-        if (ReferenceCodec.TryWriteReferenceField(ref writer, fieldIdDelta, expectedType, value))
+        if (IsReferenceTrackingSupported && ReferenceCodec.TryWriteReferenceField(ref writer, fieldIdDelta, expectedType, value))
         {
             return;
         }
@@ -102,6 +114,8 @@ public sealed class SurrogateCodec<TField, TSurrogate, TConverter>
             writer.SerializeUnexpectedType(fieldIdDelta, expectedType, value);
         }
     }
+
+    private bool IsReferenceTrackingSupported => typeof(TField) != typeof(Exception) && !typeof(TField).IsSubclassOf(typeof(Exception));
 
     /// <inheritdoc/>
     public void Serialize<TBufferWriter>(ref Writer<TBufferWriter> writer, TField value) where TBufferWriter : IBufferWriter<byte>

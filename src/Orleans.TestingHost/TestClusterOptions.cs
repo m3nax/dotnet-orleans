@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Net;
 using Orleans.Configuration;
 using Orleans.Runtime;
 
@@ -40,6 +41,11 @@ namespace Orleans.TestingHost
         /// </summary>
         /// <value><see langword="true" /> if test cluster membership should be used; otherwise, <see langword="false" />.</value>
         public bool UseTestClusterMembership { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether to use the real environment statistics.
+        /// </summary>
+        public bool UseRealEnvironmentStatistics { get; set; }
 
         /// <summary>
         /// Gets or sets a value indicating whether to initialize the client immediately on deployment.
@@ -105,11 +111,12 @@ namespace Orleans.TestingHost
         {
             var result = new Dictionary<string, string>
             {
-                [nameof(ClusterId)] = this.ClusterId,
-                [nameof(ServiceId)] = this.ServiceId,
+                [$"Orleans:{nameof(ClusterId)}"] = this.ClusterId,
+                [$"Orleans:{nameof(ServiceId)}"] = this.ServiceId,
                 [nameof(BaseSiloPort)] = this.BaseSiloPort.ToString(),
                 [nameof(BaseGatewayPort)] = this.BaseGatewayPort.ToString(),
                 [nameof(UseTestClusterMembership)] = this.UseTestClusterMembership.ToString(),
+                [nameof(UseRealEnvironmentStatistics)] = this.UseRealEnvironmentStatistics.ToString(),
                 [nameof(InitializeClientOnDeploy)] = this.InitializeClientOnDeploy.ToString(),
                 [nameof(InitialSilosCount)] = this.InitialSilosCount.ToString(),
                 [nameof(ApplicationBaseDirectory)] = this.ApplicationBaseDirectory,
@@ -118,6 +125,13 @@ namespace Orleans.TestingHost
                 [nameof(GatewayPerSilo)] = this.GatewayPerSilo.ToString(),
                 [nameof(ConnectionTransport)] = this.ConnectionTransport.ToString(),
             };
+
+            if (UseTestClusterMembership)
+            {
+                result["Orleans:Clustering:ProviderType"] = "Development";
+            }
+
+            result["UseRealEnvironmentStatistics"] = UseRealEnvironmentStatistics ? "True" : "False";
             
             if (this.SiloBuilderConfiguratorTypes != null)
             {
@@ -166,7 +180,7 @@ namespace Orleans.TestingHost
         /// Gets or sets the primary silo port.
         /// </summary>
         /// <value>The primary silo port.</value>
-        public int PrimarySiloPort { get; set; }
+        public IPEndPoint PrimarySiloEndPoint { get; set; }
 
         /// <summary>
         /// Creates an instance of the <see cref="TestSiloSpecificOptions"/> class.
@@ -178,45 +192,48 @@ namespace Orleans.TestingHost
         /// <returns>The options.</returns>
         public static TestSiloSpecificOptions Create(TestCluster testCluster, TestClusterOptions testClusterOptions, int instanceNumber, bool assignNewPort = false)
         {
-            var siloName = testClusterOptions.UseTestClusterMembership && instanceNumber == 0
-                ? Silo.PrimarySiloName
-                : $"Secondary_{instanceNumber}";
+            var result = new TestSiloSpecificOptions
+            {
+                SiloName = testClusterOptions.UseTestClusterMembership && instanceNumber == 0 ? Silo.PrimarySiloName : $"Secondary_{instanceNumber}",
+                PrimarySiloEndPoint = testClusterOptions.UseTestClusterMembership ? new IPEndPoint(IPAddress.Loopback, testClusterOptions.BaseSiloPort) : null,
+            };
+
             if (assignNewPort)
             {
-                (int siloPort, int gatewayPort) = testCluster.PortAllocator.AllocateConsecutivePortPairs(1);
-                var result = new TestSiloSpecificOptions
-                {
-                    SiloPort = siloPort,
-                    GatewayPort = (instanceNumber == 0 || testClusterOptions.GatewayPerSilo) ? gatewayPort : 0,
-                    SiloName = siloName,
-                    PrimarySiloPort = testClusterOptions.UseTestClusterMembership ? testClusterOptions.BaseSiloPort : 0,
-                };
-                return result;
+                var (siloPort, gatewayPort) = testCluster.PortAllocator.AllocateConsecutivePortPairs(1);
+                result.SiloPort = siloPort;
+                result.GatewayPort = (instanceNumber == 0 || testClusterOptions.GatewayPerSilo) ? gatewayPort : 0;
             }
             else
             {
-                var result = new TestSiloSpecificOptions
-                {
-                    SiloPort = testClusterOptions.BaseSiloPort + instanceNumber,
-                    GatewayPort = (instanceNumber == 0 || testClusterOptions.GatewayPerSilo) ? testClusterOptions.BaseGatewayPort + instanceNumber : 0,
-                    SiloName = siloName,
-                    PrimarySiloPort = testClusterOptions.UseTestClusterMembership ? testClusterOptions.BaseSiloPort : 0,
-                };
-                return result;
+                result.SiloPort = testClusterOptions.BaseSiloPort + instanceNumber;
+                result.GatewayPort = (instanceNumber == 0 || testClusterOptions.GatewayPerSilo) ? testClusterOptions.BaseGatewayPort + instanceNumber : 0;
             }
+
+            return result;
         }
 
         /// <summary>
         /// Converts these options into a dictionary.
         /// </summary>
         /// <returns>The options dictionary.</returns>
-        public Dictionary<string, string> ToDictionary() => new Dictionary<string, string>
+        public Dictionary<string, string> ToDictionary()
         {
-            [nameof(SiloPort)] = this.SiloPort.ToString(),
-            [nameof(GatewayPort)] = this.GatewayPort.ToString(),
-            [nameof(SiloName)] = this.SiloName,
-            [nameof(PrimarySiloPort)] = this.PrimarySiloPort.ToString()
-        };
+            var result = new Dictionary<string, string>
+            {
+                [$"Orleans:Endpoints:AdvertisedIPAddress"] = IPAddress.Loopback.ToString(),
+                [$"Orleans:Endpoints:{nameof(SiloPort)}"] = this.SiloPort.ToString(),
+                [$"Orleans:EndPoints:{nameof(GatewayPort)}"] = this.GatewayPort.ToString(),
+                ["Orleans:Name"] = this.SiloName,
+            };
+
+            if (PrimarySiloEndPoint != null)
+            {
+                result[$"Orleans:Clustering:{nameof(PrimarySiloEndPoint)}"] = this.PrimarySiloEndPoint.ToString();
+            }
+
+            return result;
+        }
     }
 
     /// <summary>
@@ -228,10 +245,12 @@ namespace Orleans.TestingHost
         /// Uses real TCP socket.
         /// </summary>
         TcpSocket = 0,
+
         /// <summary>
         /// Uses in memory socket.
         /// </summary>
         InMemory = 1,
+
         /// <summary>
         /// Uses in Unix socket.
         /// </summary>

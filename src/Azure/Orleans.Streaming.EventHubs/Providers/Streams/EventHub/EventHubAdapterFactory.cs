@@ -21,7 +21,7 @@ namespace Orleans.Streaming.EventHubs
     public class EventHubAdapterFactory : IQueueAdapterFactory, IQueueAdapter, IQueueAdapterCache
     {
         private readonly ILoggerFactory loggerFactory;
-        private readonly IHostEnvironmentStatistics _hostEnvironmentStatistics;
+        private readonly IEnvironmentStatisticsProvider environmentStatisticsProvider;
 
         /// <summary>
         /// Data adapter
@@ -112,7 +112,7 @@ namespace Orleans.Streaming.EventHubs
             IEventHubDataAdapter dataAdapter,
             IServiceProvider serviceProvider,
             ILoggerFactory loggerFactory,
-            IHostEnvironmentStatistics hostEnvironmentStatistics)
+            IEnvironmentStatisticsProvider environmentStatisticsProvider)
         {
             this.Name = name;
             this.cacheEvictionOptions = cacheEvictionOptions ?? throw new ArgumentNullException(nameof(cacheEvictionOptions));
@@ -123,7 +123,7 @@ namespace Orleans.Streaming.EventHubs
             this.receiverOptions = receiverOptions?? throw new ArgumentNullException(nameof(receiverOptions));
             this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
             this.loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
-            _hostEnvironmentStatistics = hostEnvironmentStatistics;
+            this.environmentStatisticsProvider = environmentStatisticsProvider;
         }
 
         public virtual void Init()
@@ -159,7 +159,7 @@ namespace Orleans.Streaming.EventHubs
         //should only need checkpointer on silo side, so move its init logic when it is used
         private void InitCheckpointerFactory()
         {
-            this.checkpointerFactory = this.serviceProvider.GetRequiredServiceByName<IStreamQueueCheckpointerFactory>(this.Name);
+            this.checkpointerFactory = this.serviceProvider.GetRequiredKeyedService<IStreamQueueCheckpointerFactory>(this.Name);
         }
         /// <summary>
         /// Create queue adapter.
@@ -288,7 +288,7 @@ namespace Orleans.Streaming.EventHubs
                 this.loggerFactory,
                 this.ReceiverMonitorFactory(receiverMonitorDimensions, this.loggerFactory),
                 this.serviceProvider.GetRequiredService<IOptions<LoadSheddingOptions>>().Value,
-                _hostEnvironmentStatistics,
+                this.environmentStatisticsProvider,
                 this.EventHubReceiverFactory);
         }
 
@@ -308,7 +308,7 @@ namespace Orleans.Streaming.EventHubs
             var cacheOptions = services.GetOptionsByName<EventHubStreamCachePressureOptions>(name);
             var statisticOptions = services.GetOptionsByName<StreamStatisticOptions>(name);
             var evictionOptions = services.GetOptionsByName<StreamCacheEvictionOptions>(name);
-            IEventHubDataAdapter dataAdapter = services.GetServiceByName<IEventHubDataAdapter>(name)
+            IEventHubDataAdapter dataAdapter = services.GetKeyedService<IEventHubDataAdapter>(name)
                 ?? services.GetService<IEventHubDataAdapter>()
                 ?? ActivatorUtilities.CreateInstance<EventHubDataAdapter>(services);
             var factory = ActivatorUtilities.CreateInstance<EventHubAdapterFactory>(services, name, ehOptions, receiverOptions, cacheOptions, evictionOptions, statisticOptions, dataAdapter);

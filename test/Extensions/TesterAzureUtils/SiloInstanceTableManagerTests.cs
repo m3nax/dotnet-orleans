@@ -52,19 +52,19 @@ namespace Tester.AzureUtils
                 this.clusterId,
                 fixture.LoggerFactory,
                 new AzureStorageClusteringOptions { TableName = new AzureStorageClusteringOptions().TableName }.ConfigureTestDefaults())
-                .WaitForResultWithThrow(SiloInstanceTableTestConstants.Timeout);
+                .WaitAsync(SiloInstanceTableTestConstants.Timeout).Result;
         }
 
         // Use TestCleanup to run code after each test has run
         public void Dispose()
         {
-            if(manager != null && SiloInstanceTableTestConstants.DeleteEntriesAfterTest)
+            if (manager != null && SiloInstanceTableTestConstants.DeleteEntriesAfterTest)
             {
                 TimeSpan timeout = SiloInstanceTableTestConstants.Timeout;
 
                 output.WriteLine("TestCleanup Timeout={0}", timeout);
 
-                manager.DeleteTableEntries(this.clusterId).WaitWithThrow(timeout);
+                manager.DeleteTableEntries(this.clusterId).WaitAsync(timeout).Wait();
 
                 output.WriteLine("TestCleanup -  Finished");
                 manager = null;
@@ -126,7 +126,7 @@ namespace Tester.AzureUtils
         public async Task SiloInstanceTable_Op_CreateSiloEntryConditionally()
         {
             bool didInsert = await manager.TryCreateTableVersionEntryAsync()
-                .WithTimeout(new AzureStoragePolicyOptions().OperationTimeout);
+                .WaitAsync(new AzureStoragePolicyOptions().OperationTimeout);
 
             Assert.True(didInsert, "Did insert");
         }
@@ -198,12 +198,12 @@ namespace Tester.AzureUtils
             RegisterSiloInstance();
 
             var gateways = await manager.FindAllGatewayProxyEndpoints();
-            Assert.Equal(0,  gateways.Count);  // "Number of gateways before Silo.Activate"
+            Assert.Empty(gateways);  // "Number of gateways before Silo.Activate"
 
             await manager.ActivateSiloInstance(myEntry);
 
             gateways = await manager.FindAllGatewayProxyEndpoints();
-            Assert.Equal(1,  gateways.Count);  // "Number of gateways after Silo.Activate"
+            Assert.Single(gateways);  // "Number of gateways after Silo.Activate"
 
             Uri myGateway = gateways.First();
             Assert.Equal(myEntry.Address,  myGateway.Host.ToString());  // "Gateway address"

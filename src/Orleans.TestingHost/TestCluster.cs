@@ -16,6 +16,8 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Hosting;
 using Orleans.TestingHost.InMemoryTransport;
 using Orleans.TestingHost.UnixSocketTransport;
+using System.Net;
+using Orleans.Statistics;
 
 namespace Orleans.TestingHost
 {
@@ -139,6 +141,26 @@ namespace Orleans.TestingHost
             this.ConfigurationSources = configurationSources.ToArray();
             this.PortAllocator = portAllocator;
             this.CreateSiloAsync = DefaultCreateSiloAsync;
+        }
+
+        /// <summary>
+        /// Returns the <see cref="IServiceProvider"/> associated with the given <paramref name="silo"/>.
+        /// </summary>
+        /// <param name="silo">The silo process to the the service provider for.</param>
+        /// <remarks>If <paramref name="silo"/> is <see langword="null"/> one of the existing silos will be picked randomly.</remarks>
+        public IServiceProvider GetSiloServiceProvider(SiloAddress silo = null)
+        {
+            if (silo != null)
+            {
+                var handle = Silos.FirstOrDefault(x => x.SiloAddress.Equals(silo));
+                return handle != null ? ((InProcessSiloHandle)handle).SiloHost.Services :
+                    throw new ArgumentException($"The provided silo address '{silo}' is unknown.");
+            }
+            else
+            {
+                var index = Random.Shared.Next(Silos.Count);
+                return ((InProcessSiloHandle)Silos[index]).SiloHost.Services;
+            }
         }
 
         /// <summary>
@@ -569,6 +591,29 @@ namespace Orleans.TestingHost
             {
                 configurationBuilder.Add(source);
             }
+            if (options.UseTestClusterMembership)
+            {
+                var gateways = new List<IPEndPoint>();
+                if (options.GatewayPerSilo)
+                {
+                    gateways.AddRange(Enumerable.Range(options.BaseGatewayPort, options.InitialSilosCount).Select(port => new IPEndPoint(IPAddress.Loopback, port)));
+                }
+                else
+                {
+                    gateways.Add(new IPEndPoint(IPAddress.Loopback, options.BaseGatewayPort));
+                }
+
+                var clustering = new Dictionary<string, string>();
+                var i = 0;
+                foreach (var v in gateways)
+                {
+                    clustering[$"Orleans:Clustering:Gateways:{i++}"] = v.ToString();
+                }
+
+                clustering["Orleans:Clustering:ProviderType"] = "Development";
+                configurationBuilder.AddInMemoryCollection(clustering);
+            }
+
             var configuration = configurationBuilder.Build();
 
             this.ClientHost = TestClusterHostFactory.CreateClusterClient(
@@ -652,10 +697,20 @@ namespace Orleans.TestingHost
                         default:
                             throw new ArgumentException($"Unsupported {nameof(ConnectionTransportType)}: {transport}");
                     }
+
+                    if (options.UseRealEnvironmentStatistics)
+                    {
+                        var descriptor = siloBuilder.Services.FirstOrDefault(descriptor => descriptor.ServiceType == typeof(IEnvironmentStatisticsProvider));
+                        if (descriptor != null)
+                        {
+                            siloBuilder.Services.Remove(descriptor);
+                            siloBuilder.Services.AddSingleton<IEnvironmentStatisticsProvider, EnvironmentStatisticsProvider>();
+                        }
+                    }
                 });
             });
         }
-        
+
         /// <summary>
         /// Start a new silo in the target cluster
         /// </summary>
@@ -752,20 +807,20 @@ namespace Orleans.TestingHost
 
             await Task.Run(async () =>
             {
-                foreach (var handle in this.SecondarySilos)
+                foreach (var handle in SecondarySilos)
                 {
-                    await DisposeAsync(handle).ConfigureAwait(false);
+                    await DisposeAsync(handle).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
                 }
 
-                if (this.Primary is not null)
+                if (Primary is not null)
                 {
-                    await DisposeAsync(Primary).ConfigureAwait(false);
+                    await DisposeAsync(Primary).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
                 }
 
-                await DisposeAsync(ClientHost).ConfigureAwait(false);
+                await DisposeAsync(ClientHost).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
                 ClientHost = null;
 
-                this.PortAllocator?.Dispose();
+                PortAllocator?.Dispose();
             });
 
             _disposed = true;

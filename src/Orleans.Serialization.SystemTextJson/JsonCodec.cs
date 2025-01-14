@@ -2,8 +2,11 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
+using Orleans.Metadata;
 using Orleans.Serialization.Buffers;
 using Orleans.Serialization.Buffers.Adaptors;
 using Orleans.Serialization.Cloning;
@@ -158,6 +161,16 @@ public class JsonCodec : IGeneralizedCodec, IGeneralizedCopier, ITypeFilter
             return true;
         }
 
+        if (CommonCodecTypeFilter.IsAbstractOrFrameworkType(type))
+        {
+            return false;
+        }
+
+        if (IsNativelySupportedType(type))
+        {
+            return true;
+        }
+
         foreach (var selector in _serializableTypeSelectors)
         {
             if (selector.IsSupportedType(type))
@@ -172,6 +185,18 @@ public class JsonCodec : IGeneralizedCodec, IGeneralizedCopier, ITypeFilter
         }
 
         return false;
+    }
+
+    private static bool IsNativelySupportedType(Type type)
+    {
+        // Add types natively supported by System.Text.Json
+        // From https://github.com/dotnet/runtime/blob/2c4d0df3b146f8322f676b83a53ca21a065bdfc7/src/libraries/System.Text.Json/gen/JsonSourceGenerator.Parser.cs#L1792-L1797
+        return type == typeof(JsonArray)
+            || type == typeof(JsonElement)
+            || type == typeof(JsonObject)
+            || type == typeof(JsonDocument)
+            || typeof(JsonNode).IsAssignableFrom(type)
+            || typeof(JsonValue).IsAssignableFrom(type);
     }
 
     /// <inheritdoc/>
@@ -204,6 +229,16 @@ public class JsonCodec : IGeneralizedCodec, IGeneralizedCopier, ITypeFilter
     /// <inheritdoc/>
     bool IGeneralizedCopier.IsSupportedType(Type type)
     {
+        if (CommonCodecTypeFilter.IsAbstractOrFrameworkType(type))
+        {
+            return false;
+        }
+
+        if (IsNativelySupportedType(type))
+        {
+            return true;
+        }
+
         foreach (var selector in _copyableTypeSelectors)
         {
             if (selector.IsSupportedType(type))

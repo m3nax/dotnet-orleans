@@ -29,7 +29,6 @@ namespace Orleans.Runtime.Scheduler
         {
             try
             {
-                RuntimeContext.SetExecutionContext(this.GrainContext);
                 RequestContext.Clear();
                 await this.continuation();
                 this.completion.TrySetResult(true);
@@ -37,10 +36,6 @@ namespace Orleans.Runtime.Scheduler
             catch (Exception exception)
             {
                 this.completion.TrySetException(exception);
-            }
-            finally
-            {
-                RuntimeContext.ResetExecutionContext();
             }
         }
 
@@ -75,7 +70,6 @@ namespace Orleans.Runtime.Scheduler
         {
             try
             {
-                RuntimeContext.SetExecutionContext(this.GrainContext);
                 RequestContext.Clear();
                 var result = await this.continuation();
                 this.completion.TrySetResult(result);
@@ -84,12 +78,32 @@ namespace Orleans.Runtime.Scheduler
             {
                 this.completion.TrySetException(exception);
             }
-            finally
-            {
-                RuntimeContext.ResetExecutionContext();
-            }
         }
 
         public override IGrainContext GrainContext { get; }
+    }
+
+    internal sealed class ClosureWorkItem<TState>(Action<TState> closure, TState state, string name, IGrainContext grainContext) : WorkItemBase
+    {
+        private readonly TaskCompletionSource<bool> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override string Name => name ?? AsyncClosureWorkItem.GetMethodName(closure);
+        public Task Task => _completion.Task;
+
+        public override void Execute()
+        {
+            try
+            {
+                RequestContext.Clear();
+                closure(state);
+                _completion.TrySetResult(true);
+            }
+            catch (Exception exception)
+            {
+                _completion.TrySetException(exception);
+            }
+        }
+
+        public override IGrainContext GrainContext { get; } = grainContext;
     }
 }

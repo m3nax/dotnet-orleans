@@ -5,6 +5,9 @@ using System.Linq;
 using Orleans.Metadata;
 using System.Collections.Immutable;
 using System.Collections.Concurrent;
+using Orleans.Runtime.Hosting;
+using System.Collections.Frozen;
+using Orleans.GrainDirectory;
 
 namespace Orleans.Runtime.Placement
 {
@@ -16,10 +19,9 @@ namespace Orleans.Runtime.Placement
         private readonly ConcurrentDictionary<GrainType, PlacementStrategy> _resolvedStrategies = new();
         private readonly Func<GrainType, PlacementStrategy> _getStrategyInternal;
         private readonly IPlacementStrategyResolver[] _resolvers;
-        private readonly IServiceProvider _services;
         private readonly GrainPropertiesResolver _grainPropertiesResolver;
-        private readonly ImmutableDictionary<string, Type> _strategies;
         private readonly PlacementStrategy _defaultPlacementStrategy;
+        private readonly IServiceProvider _services;
 
         /// <summary>
         /// Create a <see cref="PlacementStrategyResolver"/> instance.
@@ -29,24 +31,11 @@ namespace Orleans.Runtime.Placement
             IEnumerable<IPlacementStrategyResolver> resolvers,
             GrainPropertiesResolver grainPropertiesResolver)
         {
+            _services = services;
             _getStrategyInternal = GetPlacementStrategyInternal;
             _resolvers = resolvers.ToArray();
-            _services = services;
             _grainPropertiesResolver = grainPropertiesResolver;
             _defaultPlacementStrategy = services.GetService<PlacementStrategy>();
-            _strategies = GetAllStrategies(services);
-
-            static ImmutableDictionary<string, Type> GetAllStrategies(IServiceProvider services)
-            {
-                var directors = services.GetRequiredService<IKeyedServiceCollection<Type, IPlacementDirector>>();
-                var builder = ImmutableDictionary.CreateBuilder<string, Type>();
-                foreach (var service in directors.GetServices(services))
-                {
-                    builder[service.Key.Name] = service.Key;
-                }
-
-                return builder.ToImmutable();
-            }
         }
 
         /// <summary>
@@ -54,7 +43,7 @@ namespace Orleans.Runtime.Placement
         /// </summary>
         public PlacementStrategy GetPlacementStrategy(GrainType grainType) => _resolvedStrategies.GetOrAdd(grainType, _getStrategyInternal);
 
-        internal bool TryGetNonDefaultPlacementStrategy(GrainType grainType, out PlacementStrategy strategy)
+        private bool TryGetNonDefaultPlacementStrategy(GrainType grainType, out PlacementStrategy strategy)
         {
             _grainPropertiesResolver.TryGetGrainProperties(grainType, out var properties);
 
@@ -70,15 +59,15 @@ namespace Orleans.Runtime.Placement
                 && properties.Properties.TryGetValue(WellKnownGrainTypeProperties.PlacementStrategy, out var placementStrategyId)
                 && !string.IsNullOrWhiteSpace(placementStrategyId))
             {
-                if (_strategies.TryGetValue(placementStrategyId, out var strategyType))
+                strategy = _services.GetKeyedService<PlacementStrategy>(placementStrategyId);
+                if (strategy is not null)
                 {
-                    strategy = (PlacementStrategy)_services.GetService(strategyType);
                     strategy.Initialize(properties);
                     return true;
                 }
                 else
                 {
-                    throw new KeyNotFoundException($"Could not resolve placement strategy {placementStrategyId} for grain type {grainType}");
+                    throw new KeyNotFoundException($"Could not resolve placement strategy {placementStrategyId} for grain type {grainType}.");
                 }
             }
 

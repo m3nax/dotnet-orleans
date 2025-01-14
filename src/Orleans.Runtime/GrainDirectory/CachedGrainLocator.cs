@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Options;
 using Orleans.Configuration;
 using Orleans.GrainDirectory;
 using Orleans.Internal;
@@ -30,12 +31,14 @@ namespace Orleans.Runtime.GrainDirectory
         MembershipVersion ITestAccessor.LastMembershipVersion { get; set; }
 
         public CachedGrainLocator(
+            IServiceProvider serviceProvider,
             GrainDirectoryResolver grainDirectoryResolver,
-            IClusterMembershipService clusterMembershipService)
+            IClusterMembershipService clusterMembershipService,
+            IOptions<GrainDirectoryOptions> grainDirectoryOptions)
         {
             this.grainDirectoryResolver = grainDirectoryResolver;
             this.clusterMembershipService = clusterMembershipService;
-            this.cache = new LRUBasedGrainDirectoryCache(GrainDirectoryOptions.DEFAULT_CACHE_SIZE, GrainDirectoryOptions.DEFAULT_MAXIMUM_CACHE_TTL);
+            this.cache = GrainDirectoryCacheFactory.CreateCustomGrainDirectoryCache(serviceProvider, grainDirectoryOptions.Value);
         }
 
         public async ValueTask<GrainAddress> Lookup(GrainId grainId)
@@ -117,7 +120,7 @@ namespace Orleans.Runtime.GrainDirectory
             await GetGrainDirectory(address.GrainId.Type).Unregister(address);
 
             // There is the potential for a lookup to race with the Unregister and add the bad entry back to the cache.
-            if (this.cache.LookUp(address.GrainId, out var entry, out _) && entry == address)
+            if (this.cache.LookUp(address.GrainId, out var entry, out _) && entry.Equals(address))
             {
                 this.cache.Remove(address);
             }
@@ -134,7 +137,7 @@ namespace Orleans.Runtime.GrainDirectory
             {
                 this.shutdownToken.Cancel();
                 if (listenToClusterChangeTask != default && !ct.IsCancellationRequested)
-                    await listenToClusterChangeTask.WithCancellation(ct);
+                    await listenToClusterChangeTask.WaitAsync(ct);
             };
             lifecycle.Subscribe(nameof(CachedGrainLocator), ServiceLifecycleStage.RuntimeGrainServices, OnStart, OnStop);
         }
@@ -164,7 +167,7 @@ namespace Orleans.Runtime.GrainDirectory
                     {
                         tasks.Add(directory.UnregisterSilos(deadSilos));
                     }
-                    await Task.WhenAll(tasks).WithCancellation(this.shutdownToken.Token);
+                    await Task.WhenAll(tasks).WaitAsync(this.shutdownToken.Token);
                 }
 
                 ((ITestAccessor)this).LastMembershipVersion = snapshot.Version;
@@ -192,7 +195,7 @@ namespace Orleans.Runtime.GrainDirectory
 
         private static void ThrowUnsupportedGrainType(GrainId grainId) => throw new InvalidOperationException($"Unsupported grain type for grain {grainId}");
 
-        public void CachePlacementDecision(GrainId grainId, SiloAddress siloAddress) => cache.AddOrUpdate(new GrainAddress { GrainId = grainId, SiloAddress = siloAddress }, 0);
+        public void UpdateCache(GrainId grainId, SiloAddress siloAddress) => cache.AddOrUpdate(new GrainAddress { GrainId = grainId, SiloAddress = siloAddress }, 0);
         public void InvalidateCache(GrainId grainId) => cache.Remove(grainId);
         public void InvalidateCache(GrainAddress address) => cache.Remove(address);
         public bool TryLookupInCache(GrainId grainId, out GrainAddress address)

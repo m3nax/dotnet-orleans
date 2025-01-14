@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Orleans.Runtime;
 using Orleans.TestingHost;
 using Orleans.Transactions.TestKit;
@@ -17,8 +18,7 @@ namespace Orleans.Transactions.Tests
             public void Configure(ISiloBuilder hostBuilder)
             {
                 hostBuilder
-                    .ConfigureServices(services => services.AddSingletonNamedService<IRemoteCommitService, RemoteCommitService>(TransactionTestConstants.RemoteCommitService))
-                    .ConfigureTracingForTransactionTests()
+                    .ConfigureServices(services => services.AddKeyedSingleton<IRemoteCommitService, RemoteCommitService>(TransactionTestConstants.RemoteCommitService))
                     .AddMemoryGrainStorage(TransactionTestConstants.TransactionStore)
                     .UseTransactions();
             }

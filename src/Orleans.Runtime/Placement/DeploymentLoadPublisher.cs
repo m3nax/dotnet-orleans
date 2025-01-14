@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -14,15 +15,14 @@ namespace Orleans.Runtime
     /// <summary>
     /// This class collects runtime statistics for all silos in the current deployment for use by placement.
     /// </summary>
-    internal class DeploymentLoadPublisher : SystemTarget, IDeploymentLoadPublisher, ISiloStatusListener
+    internal class DeploymentLoadPublisher : SystemTarget, IDeploymentLoadPublisher, ISiloStatusListener, ILifecycleParticipant<ISiloLifecycle>
     {
         private readonly ILocalSiloDetails _siloDetails;
         private readonly ISiloStatusOracle _siloStatusOracle;
         private readonly IInternalGrainFactory _grainFactory;
         private readonly ActivationDirectory _activationDirectory;
         private readonly IActivationWorkingSet _activationWorkingSet;
-        private readonly IAppEnvironmentStatistics _appEnvironmentStatistics;
-        private readonly IHostEnvironmentStatistics _hostEnvironmentStatistics;
+        private readonly IEnvironmentStatisticsProvider _environmentStatisticsProvider;
         private readonly IOptions<LoadSheddingOptions> _loadSheddingOptions;
         private readonly ConcurrentDictionary<SiloAddress, SiloRuntimeStatistics> _periodicStats;
         private readonly TimeSpan _statisticsRefreshTime;
@@ -44,9 +44,9 @@ namespace Orleans.Runtime
             ILoggerFactory loggerFactory,
             ActivationDirectory activationDirectory,
             IActivationWorkingSet activationWorkingSet,
-            IAppEnvironmentStatistics appEnvironmentStatistics,
-            IHostEnvironmentStatistics hostEnvironmentStatistics,
-            IOptions<LoadSheddingOptions> loadSheddingOptions)
+            IEnvironmentStatisticsProvider environmentStatisticsProvider,
+            IOptions<LoadSheddingOptions> loadSheddingOptions,
+            Catalog catalog)
             : base(Constants.DeploymentLoadPublisherSystemTargetType, siloDetails.SiloAddress, loggerFactory)
         {
             _logger = loggerFactory.CreateLogger<DeploymentLoadPublisher>();
@@ -55,15 +55,16 @@ namespace Orleans.Runtime
             _grainFactory = grainFactory;
             _activationDirectory = activationDirectory;
             _activationWorkingSet = activationWorkingSet;
-            _appEnvironmentStatistics = appEnvironmentStatistics;
-            _hostEnvironmentStatistics = hostEnvironmentStatistics;
+            _environmentStatisticsProvider = environmentStatisticsProvider;
             _loadSheddingOptions = loadSheddingOptions;
             _statisticsRefreshTime = options.Value.DeploymentLoadPublisherRefreshTime;
             _periodicStats = new ConcurrentDictionary<SiloAddress, SiloRuntimeStatistics>();
             _siloStatisticsChangeListeners = new List<ISiloStatisticsChangeListener>();
+            catalog.RegisterSystemTarget(this);
+            siloStatusOracle.SubscribeToSiloStatusEvents(this);
         }
 
-        public async Task Start()
+        private async Task StartAsync(CancellationToken cancellationToken)
         {
             if (_logger.IsEnabled(LogLevel.Debug))
             {
@@ -79,8 +80,7 @@ namespace Orleans.Runtime
                     static state => ((DeploymentLoadPublisher)state).PublishStatistics(),
                     this,
                     randomTimerOffset,
-                    _statisticsRefreshTime,
-                    "DeploymentLoadPublisher.PublishStatisticsTimer");
+                    _statisticsRefreshTime);
             }
 
             await RefreshClusterStatistics();
@@ -106,8 +106,7 @@ namespace Orleans.Runtime
                 var myStats = new SiloRuntimeStatistics(
                     _activationDirectory.Count,
                     _activationWorkingSet.Count,
-                    _appEnvironmentStatistics,
-                    _hostEnvironmentStatistics,
+                    _environmentStatisticsProvider,
                     _loadSheddingOptions,
                     new DateTime(ticks, DateTimeKind.Utc));
 
@@ -257,13 +256,21 @@ namespace Orleans.Runtime
         {
             if (!status.IsTerminating()) return;
 
-            if (Equals(updatedSilo, Silo))
-            {
-                _publishTimer.Dispose();
-            }
-
             _periodicStats.TryRemove(updatedSilo, out _);
             NotifyAllStatisticsChangeEventsSubscribers(updatedSilo, null);
+        }
+
+        void ILifecycleParticipant<ISiloLifecycle>.Participate(ISiloLifecycle observer)
+        {
+            observer.Subscribe(
+                nameof(DeploymentLoadPublisher),
+                ServiceLifecycleStage.RuntimeGrainServices,
+                StartAsync,
+                ct =>
+            {
+                _publishTimer.Dispose();
+                return Task.CompletedTask;
+            });
         }
     }
 }

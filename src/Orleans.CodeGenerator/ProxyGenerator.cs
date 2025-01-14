@@ -16,21 +16,26 @@ namespace Orleans.CodeGenerator
     /// <summary>
     /// Generates RPC stub objects called invokers.
     /// </summary>
-    internal static class ProxyGenerator
+    internal class ProxyGenerator
     {
         private const string CopyContextPoolMemberName = "CopyContextPool";
         private const string CodecProviderMemberName = "CodecProvider";
+        private readonly CodeGenerator _codeGenerator;
 
-        public static (ClassDeclarationSyntax, GeneratedProxyDescription) Generate(
-            LibraryTypes libraryTypes,
-            InvokableInterfaceDescription interfaceDescription,
-            MetadataModel metadataModel)
+        public ProxyGenerator(CodeGenerator codeGenerator)
+        {
+            _codeGenerator = codeGenerator;
+        }
+
+        private LibraryTypes LibraryTypes => _codeGenerator.LibraryTypes;
+
+        public (ClassDeclarationSyntax, GeneratedProxyDescription) Generate(ProxyInterfaceDescription interfaceDescription)
         {
             var generatedClassName = GetSimpleClassName(interfaceDescription);
 
-            var fieldDescriptions = GetFieldDescriptions(interfaceDescription, metadataModel, libraryTypes);
+            var fieldDescriptions = GetFieldDescriptions(interfaceDescription);
             var fieldDeclarations = GetFieldDeclarations(fieldDescriptions);
-            var proxyMethods = CreateProxyMethods(libraryTypes, fieldDescriptions, interfaceDescription, metadataModel);
+            var proxyMethods = CreateProxyMethods(fieldDescriptions, interfaceDescription);
 
             var ctors = GenerateConstructors(generatedClassName, fieldDescriptions, interfaceDescription.ProxyBaseType);
 
@@ -39,8 +44,7 @@ namespace Orleans.CodeGenerator
                     SimpleBaseType(interfaceDescription.ProxyBaseType.ToTypeSyntax()),
                     SimpleBaseType(interfaceDescription.InterfaceType.ToTypeSyntax()))
                 .AddModifiers(Token(SyntaxKind.InternalKeyword), Token(SyntaxKind.SealedKeyword))
-                .AddAttributeLists(
-                    AttributeList(SingletonSeparatedList(CodeGenerator.GetGeneratedCodeAttributeSyntax())))
+                .AddAttributeLists(CodeGenerator.GetGeneratedCodeAttributes())
                 .AddMembers(fieldDeclarations)
                 .AddMembers(ctors)
                 .AddMembers(proxyMethods);
@@ -51,27 +55,26 @@ namespace Orleans.CodeGenerator
                 classDeclaration = SyntaxFactoryUtility.AddGenericTypeParameters(classDeclaration, typeParameters);
             }
 
-            return (classDeclaration, new GeneratedProxyDescription(interfaceDescription));
+            return (classDeclaration, new GeneratedProxyDescription(interfaceDescription, generatedClassName));
         }
 
-        public static string GetSimpleClassName(InvokableInterfaceDescription interfaceDescription) => $"Proxy_{interfaceDescription.Name}";
-
-        private static List<GeneratedFieldDescription> GetFieldDescriptions(
-            InvokableInterfaceDescription interfaceDescription,
-            MetadataModel metadataModel,
-            LibraryTypes libraryTypes)
+        public static string GetSimpleClassName(ProxyInterfaceDescription interfaceDescription)
+            => $"Proxy_{SyntaxGeneration.Identifier.SanitizeIdentifierName(interfaceDescription.Name)}";
+        
+        private List<GeneratedFieldDescription> GetFieldDescriptions(
+            ProxyInterfaceDescription interfaceDescription)
         {
             var fields = new List<GeneratedFieldDescription>();
 
-            // Add a codec field for any method parameter which does not have a static codec.
-            var allTypes = interfaceDescription.Methods
+            // Add a copier field for any method parameter which does not have a static codec.
+            var paramCopiers = interfaceDescription.Methods
                 .Where(method => method.MethodTypeParameters.Count == 0)
-                .SelectMany(method => metadataModel.GeneratedInvokables[method].Members);
-            GetCopierFieldDescriptions(allTypes, libraryTypes, fields);
+                .SelectMany(method => method.GeneratedInvokable.Members);
+            _codeGenerator.CopierGenerator.GetCopierFieldDescriptions(paramCopiers, fields);
             return fields;
         }
 
-        private static MemberDeclarationSyntax[] GetFieldDeclarations(List<GeneratedFieldDescription> fieldDescriptions)
+        private MemberDeclarationSyntax[] GetFieldDeclarations(List<GeneratedFieldDescription> fieldDescriptions)
         {
             return fieldDescriptions.Select(GetFieldDeclaration).ToArray();
 
@@ -82,11 +85,9 @@ namespace Orleans.CodeGenerator
             }
         }
 
-        private static MemberDeclarationSyntax[] CreateProxyMethods(
-            LibraryTypes libraryTypes,
+        private MemberDeclarationSyntax[] CreateProxyMethods(
             List<GeneratedFieldDescription> fieldDescriptions,
-            InvokableInterfaceDescription interfaceDescription,
-            MetadataModel metadataModel)
+            ProxyInterfaceDescription interfaceDescription)
         {
             var res = new List<MemberDeclarationSyntax>();
             foreach (var methodDescription in interfaceDescription.Methods)
@@ -95,10 +96,10 @@ namespace Orleans.CodeGenerator
             }
             return res.ToArray();
 
-            MethodDeclarationSyntax CreateProxyMethod(MethodDescription methodDescription)
+            MethodDeclarationSyntax CreateProxyMethod(ProxyMethodDescription methodDescription)
             {
+                var (isAsync, body) = CreateAsyncProxyMethodBody(fieldDescriptions, methodDescription);
                 var method = methodDescription.Method;
-                var (isAsync, body) = CreateAsyncProxyMethodBody(libraryTypes, fieldDescriptions, metadataModel, methodDescription);
                 var declaration = MethodDeclaration(method.ReturnType.ToTypeSyntax(methodDescription.TypeParameterSubstitutions), method.Name.EscapeIdentifier())
                     .AddParameterListParameters(method.Parameters.Select((p, i) => GetParameterSyntax(i, p, methodDescription.TypeParameterSubstitutions)).ToArray())
                     .WithBody(body);
@@ -108,26 +109,8 @@ namespace Orleans.CodeGenerator
                     declaration = declaration.WithModifiers(TokenList(Token(SyntaxKind.AsyncKeyword)));
                 }
 
-                if (methodDescription.HasCollision)
-                {
-                    declaration = declaration.WithModifiers(TokenList(Token(SyntaxKind.PublicKeyword)));
-
-                    // Type parameter constrains are not valid on explicit interface definitions
-                    var typeParameters = SyntaxFactoryUtility.GetTypeParameterConstraints(methodDescription.MethodTypeParameters);
-                    foreach (var (name, constraints) in typeParameters)
-                    {
-                        if (constraints.Count > 0)
-                        {
-                            declaration = declaration.AddConstraintClauses(
-                                TypeParameterConstraintClause(name).AddConstraints(constraints.ToArray()));
-                        }
-                    }
-                }
-                else
-                {
-                    var explicitInterfaceSpecifier = ExplicitInterfaceSpecifier(methodDescription.Method.ContainingType.ToNameSyntax());
-                    declaration = declaration.WithExplicitInterfaceSpecifier(explicitInterfaceSpecifier);
-                }
+                var explicitInterfaceSpecifier = ExplicitInterfaceSpecifier(methodDescription.Method.ContainingType.ToNameSyntax());
+                declaration = declaration.WithExplicitInterfaceSpecifier(explicitInterfaceSpecifier);
 
                 if (methodDescription.MethodTypeParameters.Count > 0)
                 {
@@ -139,20 +122,19 @@ namespace Orleans.CodeGenerator
             }
         }
 
-        private static (bool IsAsync, BlockSyntax body) CreateAsyncProxyMethodBody(
-            LibraryTypes libraryTypes,
+        private (bool IsAsync, BlockSyntax body) CreateAsyncProxyMethodBody(
             List<GeneratedFieldDescription> fieldDescriptions,
-            MetadataModel metadataModel,
-            MethodDescription methodDescription)
+            ProxyMethodDescription methodDescription)
         {
             var statements = new List<StatementSyntax>();
             var requestVar = IdentifierName("request");
-            var requestDescription = metadataModel.GeneratedInvokables[methodDescription];
-            ExpressionSyntax createRequestExpr = (!requestDescription.IsEmptyConstructable || requestDescription.UseActivator) switch
+            var methodSymbol = methodDescription.Method;
+            var invokable = methodDescription.GeneratedInvokable;
+            ExpressionSyntax createRequestExpr = (!invokable.IsEmptyConstructable || invokable.UseActivator) switch
             {
-                true => InvocationExpression(ThisExpression().Member("GetInvokable", requestDescription.TypeSyntax))
+                true => InvocationExpression(ThisExpression().Member("GetInvokable", invokable.TypeSyntax))
                 .WithArgumentList(ArgumentList(SeparatedList<ArgumentSyntax>())),
-                _ => ObjectCreationExpression(requestDescription.TypeSyntax).WithArgumentList(ArgumentList())
+                _ => ObjectCreationExpression(invokable.TypeSyntax).WithArgumentList(ArgumentList())
             };
 
             statements.Add(
@@ -166,12 +148,12 @@ namespace Orleans.CodeGenerator
                                     EqualsValueClause(createRequestExpr))))));
 
             var codecs = fieldDescriptions.OfType<ICopierDescription>()
-                    .Concat(libraryTypes.StaticCopiers)
+                    .Concat(_codeGenerator.LibraryTypes.StaticCopiers)
                     .ToList();
 
             // Set request object fields from method parameters.
             var parameterIndex = 0;
-            var parameters = requestDescription.Members.OfType<MethodParameterFieldDescription>().Select(member => new SerializableMethodMember(member));
+            var parameters = invokable.Members.OfType<MethodParameterFieldDescription>().Select(member => new SerializableMethodMember(member));
             ExpressionSyntax copyContextPool = BaseExpression().Member(CopyContextPoolMemberName);
             ExpressionSyntax copyContextVariable = IdentifierName("copyContext");
             var hasCopyContext = false;
@@ -193,9 +175,8 @@ namespace Orleans.CodeGenerator
                     hasCopyContext = true;
                 }
 
-                var valueExpression = GenerateMemberCopy(
+                var valueExpression = _codeGenerator.CopierGenerator.GenerateMemberCopy(
                     fieldDescriptions,
-                    libraryTypes,
                     IdentifierName($"arg{parameterIndex}"),
                     copyContextVariable,
                     codecs,
@@ -214,7 +195,7 @@ namespace Orleans.CodeGenerator
             string invokeMethodName = default;
             foreach (var attr in methodDescription.Method.GetAttributes())
             {
-                if (attr.AttributeClass.GetAttributes(libraryTypes.InvokeMethodNameAttribute, out var attrs))
+                if (attr.AttributeClass.GetAttributes(LibraryTypes.InvokeMethodNameAttribute, out var attrs))
                 {
                     foreach (var methodAttr in attrs)
                     {
@@ -226,7 +207,7 @@ namespace Orleans.CodeGenerator
             var methodReturnType = methodDescription.Method.ReturnType;
             if (methodReturnType is not INamedTypeSymbol namedMethodReturnType)
             {
-                var diagnostic = InvalidRpcMethodReturnTypeDiagnostic.CreateDiagnostic(methodDescription);
+                var diagnostic = InvalidRpcMethodReturnTypeDiagnostic.CreateDiagnostic(methodDescription.InvokableMethod);
                 throw new OrleansGeneratorDiagnosticAnalysisException(diagnostic);
             }
 
@@ -259,20 +240,20 @@ namespace Orleans.CodeGenerator
 
             var rt = namedMethodReturnType.ConstructedFrom;
             bool isAsync;
-            if (SymbolEqualityComparer.Default.Equals(rt, libraryTypes.Task_1) || SymbolEqualityComparer.Default.Equals(methodReturnType, libraryTypes.Task))
+            if (SymbolEqualityComparer.Default.Equals(rt, LibraryTypes.Task_1) || SymbolEqualityComparer.Default.Equals(methodReturnType, LibraryTypes.Task))
             {
                 // C#: return <invocation>.AsTask()
                 statements.Add(ReturnStatement(InvocationExpression(invocationExpression.Member("AsTask"), ArgumentList())));
                 isAsync = false;
             }
-            else if (SymbolEqualityComparer.Default.Equals(rt, libraryTypes.ValueTask_1) || SymbolEqualityComparer.Default.Equals(methodReturnType, libraryTypes.ValueTask))
+            else if (SymbolEqualityComparer.Default.Equals(rt, LibraryTypes.ValueTask_1) || SymbolEqualityComparer.Default.Equals(methodReturnType, LibraryTypes.ValueTask))
             {
                 // ValueTask<T> / ValueTask
                 // C#: return <invocation>
                 statements.Add(ReturnStatement(invocationExpression));
                 isAsync = false;
             }
-            else if (requestDescription.ReturnValueInitializerMethod is { } returnValueInitializerMethod)
+            else if (invokable.ReturnValueInitializerMethod is { } returnValueInitializerMethod)
             {
                 // C#: return request.<returnValueInitializerMethod>(this);
                 statements.Add(ReturnStatement(InvocationExpression(requestVar.Member(returnValueInitializerMethod), ArgumentList(SingletonSeparatedList(Argument(ThisExpression()))))));
@@ -300,7 +281,7 @@ namespace Orleans.CodeGenerator
             return (isAsync, Block(statements));
         }
 
-        private static MemberDeclarationSyntax[] GenerateConstructors(
+        private MemberDeclarationSyntax[] GenerateConstructors(
             string simpleClassName,
             List<GeneratedFieldDescription> fieldDescriptions,
             INamedTypeSymbol baseType)
@@ -426,7 +407,7 @@ namespace Orleans.CodeGenerator
             }
         }
 
-        private static ParameterSyntax GetParameterSyntax(int index, IParameterSymbol parameter, Dictionary<ITypeParameterSymbol, string> typeParameterSubstitutions)
+        private ParameterSyntax GetParameterSyntax(int index, IParameterSymbol parameter, Dictionary<ITypeParameterSymbol, string> typeParameterSubstitutions)
         {
             var result = Parameter(Identifier($"arg{index}")).WithType(parameter.Type.ToTypeSyntax(typeParameterSubstitutions));
             switch (parameter.RefKind)

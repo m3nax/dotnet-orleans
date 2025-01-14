@@ -201,7 +201,7 @@ namespace Orleans.Runtime.Messaging
 
                 this.StartConnection(address, connection);
 
-                await connection.Initialized.WithCancellation(openConnectionCancellation.Token);
+                await connection.Initialized.WaitAsync(openConnectionCancellation.Token);
                 this.OnConnected(address, connection, entry);
 
                 return connection;
@@ -325,7 +325,7 @@ namespace Orleans.Runtime.Messaging
             ThreadPool.UnsafeQueueUserWorkItem(state =>
             {
                 var (t, address, connection) = ((ConnectionManager, SiloAddress, Connection))state;
-                _ = t.RunConnectionAsync(address, connection);
+                t.RunConnectionAsync(address, connection).Ignore();
             }, (this, address, connection));
         }
 

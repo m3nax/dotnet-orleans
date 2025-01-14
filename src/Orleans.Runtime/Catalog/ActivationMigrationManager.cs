@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using System.Threading.Tasks.Sources;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.ObjectPool;
+using Orleans.Internal;
 using Orleans.Runtime.Internal;
 using Orleans.Runtime.Scheduler;
 
@@ -52,11 +53,12 @@ internal interface IActivationMigrationManager
 /// <summary>
 /// Migrates grain activations to target hosts and handles migration requests from other hosts.
 /// </summary>
-internal class ActivationMigrationManager : SystemTarget, IActivationMigrationManagerSystemTarget, IActivationMigrationManager
+internal class ActivationMigrationManager : SystemTarget, IActivationMigrationManagerSystemTarget, IActivationMigrationManager, ILifecycleParticipant<ISiloLifecycle>
 {
     private const int MaxBatchSize = 1_000;
     private readonly ConcurrentDictionary<SiloAddress, (Task PumpTask, Channel<MigrationWorkItem> WorkItemChannel)> _workers = new();
     private readonly ObjectPool<MigrationWorkItem> _workItemPool = ObjectPool.Create(new MigrationWorkItem.ObjectPoolPolicy());
+    private readonly CancellationTokenSource _shuttingDownCts = new();
     private readonly ILogger<ActivationMigrationManager> _logger;
     private readonly IInternalGrainFactory _grainFactory;
     private readonly Catalog _catalog;
@@ -113,7 +115,7 @@ internal class ActivationMigrationManager : SystemTarget, IActivationMigrationMa
             {
                 lock (activation)
                 {
-                    if (activation.State is not ActivationState.Valid or ActivationState.Invalid or ActivationState.FailedToActivate)
+                    if (activation.State is not (ActivationState.Valid or ActivationState.Invalid))
                     {
                         allActiveOrTerminal = false;
                         break;
@@ -213,7 +215,7 @@ internal class ActivationMigrationManager : SystemTarget, IActivationMigrationMa
                     }
 
                     // Attempt to migrate the batch.
-                    await remote.AcceptMigratingGrains(batch);
+                    await remote.AcceptMigratingGrains(batch).AsTask().WaitAsync(_shuttingDownCts.Token);
 
                     foreach (var item in items)
                     {
@@ -227,7 +229,10 @@ internal class ActivationMigrationManager : SystemTarget, IActivationMigrationMa
                 }
                 catch (Exception exception)
                 {
-                    _logger.LogError(exception, "Error while migrating {Count} grain activations to {SiloAddress}", items.Count, targetSilo);
+                    if (!_shuttingDownCts.IsCancellationRequested)
+                    {
+                        _logger.LogError(exception, "Error while migrating {Count} grain activations to {SiloAddress}", items.Count, targetSilo);
+                    }
 
                     foreach (var item in items)
                     {
@@ -303,6 +308,37 @@ internal class ActivationMigrationManager : SystemTarget, IActivationMigrationMa
                 item.SetException(exception);
             }
         }
+    }
+
+    private Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    private async Task StopAsync(CancellationToken cancellationToken)
+    {
+        var workerTasks = new List<Task>();
+        foreach (var (_, value) in _workers)
+        {
+            value.WorkItemChannel.Writer.TryComplete();
+            workerTasks.Add(value.PumpTask);
+        }
+
+        try
+        {
+            _shuttingDownCts.Cancel();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Error signaling shutdown.");
+        }
+
+        await Task.WhenAll(workerTasks).WaitAsync(cancellationToken).SuppressThrowing();
+    }
+
+    void ILifecycleParticipant<ISiloLifecycle>.Participate(ISiloLifecycle lifecycle)
+    {
+        lifecycle.Subscribe(
+            nameof(ActivationMigrationManager),
+            ServiceLifecycleStage.RuntimeGrainServices,
+                ct => this.RunOrQueueTask(() => StartAsync(ct)),
+                ct => this.RunOrQueueTask(() => StopAsync(ct)));
     }
 
     private class MigrationWorkItem : IValueTaskSource

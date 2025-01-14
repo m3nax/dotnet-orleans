@@ -1,13 +1,18 @@
+// Ignore Spelling: Locator
+
 using System.Collections.Immutable;
 using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using NSubstitute.ReceivedExtensions;
+using Orleans.Configuration;
 using Orleans.GrainDirectory;
 using Orleans.Metadata;
 using Orleans.Runtime;
 using Orleans.Runtime.GrainDirectory;
+using Orleans.Runtime.Hosting;
 using TestExtensions;
 using Xunit;
 using Xunit.Abstractions;
@@ -19,7 +24,7 @@ namespace UnitTests.Directory
     {
         private readonly LoggerFactory loggerFactory;
         private readonly SiloLifecycleSubject lifecycle;
-
+        private readonly IOptions<GrainDirectoryOptions> grainDirectoryOptions;
         private readonly IGrainDirectory grainDirectory;
         private readonly GrainDirectoryResolver grainDirectoryResolver;
         private readonly MockClusterMembershipService mockMembershipService;
@@ -32,8 +37,7 @@ namespace UnitTests.Directory
 
             this.grainDirectory = Substitute.For<IGrainDirectory>();
             var services = new ServiceCollection()
-                .AddSingleton(typeof(IKeyedServiceCollection<,>), typeof(KeyedServiceCollection<,>))
-                .AddSingletonKeyedService(GrainDirectoryAttribute.DEFAULT_GRAIN_DIRECTORY, (sp, name) => this.grainDirectory)
+                .AddGrainDirectory(GrainDirectoryAttribute.DEFAULT_GRAIN_DIRECTORY, (sp, name) => this.grainDirectory)
                 .BuildServiceProvider();
 
             this.grainDirectoryResolver = new GrainDirectoryResolver(
@@ -42,9 +46,12 @@ namespace UnitTests.Directory
                 Array.Empty<IGrainDirectoryResolver>());
             this.mockMembershipService = new MockClusterMembershipService();
 
+            grainDirectoryOptions = Options.Create(new GrainDirectoryOptions());
             this.grainLocator = new CachedGrainLocator(
+                services,
                 this.grainDirectoryResolver, 
-                this.mockMembershipService.Target);
+                this.mockMembershipService.Target,
+                grainDirectoryOptions);
 
             this.grainLocator.Participate(this.lifecycle);
         }
@@ -499,8 +506,7 @@ namespace UnitTests.Directory
         {
             public ClusterManifest Current => new ClusterManifest(
                 MajorMinorVersion.Zero,
-                ImmutableDictionary<SiloAddress, GrainManifest>.Empty,
-                ImmutableArray.Create(new GrainManifest(ImmutableDictionary<GrainType, GrainProperties>.Empty, ImmutableDictionary<GrainInterfaceType, GrainInterfaceProperties>.Empty)));
+                ImmutableDictionary<SiloAddress, GrainManifest>.Empty);
 
             public IAsyncEnumerable<ClusterManifest> Updates => this.GetUpdates();
 

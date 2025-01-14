@@ -53,7 +53,7 @@ namespace UnitTests.TimerTests
             // ReminderTable.Clear() cannot be called from a non-Orleans thread,
             // so we must proxy the call through a grain.
             var controlProxy = this.GrainFactory.GetGrain<IReminderTestGrain2>(Guid.NewGuid());
-            controlProxy.EraseReminderTable().WaitWithThrow(TestConstants.InitTimeout);
+            controlProxy.EraseReminderTable().WaitAsync(TestConstants.InitTimeout).Wait();
         }
 
         public async Task Test_Reminders_Basic_StopByRef()
@@ -66,7 +66,7 @@ namespace UnitTests.TimerTests
             {
                 // First handle should now be out of date once the seconf handle to the same reminder was obtained
                 await grain.StopReminder(r1);
-                Assert.True(false, "Removed reminder1, which shouldn't be possible.");
+                Assert.Fail("Removed reminder1, which shouldn't be possible.");
             }
             catch (Exception exc)
             {
@@ -154,7 +154,7 @@ namespace UnitTests.TimerTests
             await this.HostedCluster.StartAdditionalSilosAsync(1, true);
 
             //Block until all tasks complete.
-            await Task.WhenAll(tasks).WithTimeout(ENDWAIT);
+            await Task.WhenAll(tasks).WaitAsync(ENDWAIT);
         }
 
         public async Task Test_Reminders_ReminderNotFound()
@@ -368,7 +368,7 @@ namespace UnitTests.TimerTests
             {
                 try
                 {
-                    await function(reminderName, period, validate).WithTimeout(TestConstants.InitTimeout);
+                    await function(reminderName, period, validate).WaitAsync(TestConstants.InitTimeout);
                     return; // success ... no need to retry
                 }
                 catch (AggregateException aggEx)
@@ -385,7 +385,7 @@ namespace UnitTests.TimerTests
             }
 
             // execute one last time and bubble up errors if any
-            await function(reminderName, period, validate).WithTimeout(TestConstants.InitTimeout);
+            await function(reminderName, period, validate).WaitAsync(TestConstants.InitTimeout);
         }
 
         // Func<> doesnt take optional parameters, thats why we need a separate method
@@ -395,7 +395,7 @@ namespace UnitTests.TimerTests
             {
                 try
                 {
-                    await function(reminderName).WithTimeout(TestConstants.InitTimeout);
+                    await function(reminderName).WaitAsync(TestConstants.InitTimeout);
                     return; // success ... no need to retry
                 }
                 catch (Exception exception)
@@ -405,7 +405,7 @@ namespace UnitTests.TimerTests
             }
 
             // execute one last time and bubble up errors if any
-            await function(reminderName).WithTimeout(TestConstants.InitTimeout);
+            await function(reminderName).WaitAsync(TestConstants.InitTimeout);
         }
 
         private async Task<bool> HandleError(Exception ex, long i)

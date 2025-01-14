@@ -48,34 +48,24 @@ namespace UnitTests
         }
 
         [Fact, TestCategory("Functional"), TestCategory("Tasks"), TestCategory("Reentrancy")]
-        public void ReentrantGrain()
+        public async Task ReentrantGrain()
         {
             var reentrant = this.fixture.GrainFactory.GetGrain<IReentrantGrain>(GetRandomGrainId());
-            reentrant.SetSelf(reentrant).Wait();
-            try
-            {
-                Assert.True(reentrant.Two().Wait(2000), "Grain should reenter");
-            }
-            catch (Exception ex)
-            {
-                Assert.True(false, string.Format("Unexpected exception {0}: {1}", ex.Message, ex.StackTrace));
-            }
+            await reentrant.SetSelf(reentrant);
+
+            // Should reenter
+            await reentrant.Two().WaitAsync(TimeSpan.FromSeconds(5));
             this.fixture.Logger.LogInformation("Reentrancy ReentrantGrain Test finished OK.");
         }
 
         [Fact, TestCategory("Functional"), TestCategory("Tasks"), TestCategory("Reentrancy")]
-        public void NonReentrantGrain_WithMayInterleaveStaticPredicate_WhenPredicateReturnsTrue()
+        public async Task NonReentrantGrain_WithMayInterleaveStaticPredicate_WhenPredicateReturnsTrue()
         {
             var grain = this.fixture.GrainFactory.GetGrain<IMayInterleaveStaticPredicateGrain>(GetRandomGrainId());
-            grain.SetSelf(grain).Wait();
-            try
-            {
-                Assert.True(grain.TwoReentrant().Wait(2000), "Grain should reenter when MayInterleave predicate returns true");
-            }
-            catch (Exception ex)
-            {
-                Assert.True(false, string.Format("Unexpected exception {0}: {1}", ex.Message, ex.StackTrace));
-            }
+            await grain.SetSelf(grain);
+
+            // Should reenter since predicate should return true.
+            await grain.TwoReentrant().WaitAsync(TimeSpan.FromSeconds(5));
             this.fixture.Logger.LogInformation("Reentrancy NonReentrantGrain_WithMayInterleaveStaticPredicate_WhenPredicateReturnsTrue Test finished OK.");
         }
 
@@ -83,10 +73,10 @@ namespace UnitTests
         public async Task NonReentrantGrain_WithMayInterleaveStaticPredicate_WhenPredicateThrows()
         {
             var grain = this.fixture.GrainFactory.GetGrain<IMayInterleaveStaticPredicateGrain>(GetRandomGrainId());
-            grain.SetSelf(grain).Wait();
+            await grain.SetSelf(grain);
             try
             {
-                await grain.Exceptional().WithTimeout(TimeSpan.FromSeconds(2));
+                await grain.Exceptional().WaitAsync(TimeSpan.FromSeconds(2));
             }
             catch (Exception ex)
             {
@@ -98,18 +88,13 @@ namespace UnitTests
         }
 
         [Fact, TestCategory("Functional"), TestCategory("Tasks"), TestCategory("Reentrancy")]
-        public void NonReentrantGrain_WithMayInterleaveInstancedPredicate_WhenPredicateReturnsTrue()
+        public async Task NonReentrantGrain_WithMayInterleaveInstancedPredicate_WhenPredicateReturnsTrue()
         {
             var grain = this.fixture.GrainFactory.GetGrain<IMayInterleaveInstancedPredicateGrain>(GetRandomGrainId());
-            grain.SetSelf(grain).Wait();
-            try
-            {
-                Assert.True(grain.TwoReentrant().Wait(2000), "Grain should reenter when MayInterleave predicate returns true");
-            }
-            catch (Exception ex)
-            {
-                Assert.True(false, string.Format("Unexpected exception {0}: {1}", ex.Message, ex.StackTrace));
-            }
+            await grain.SetSelf(grain);
+
+            // Grain should reenter when MayInterleave predicate returns true
+            await grain.TwoReentrant().WaitAsync(TimeSpan.FromSeconds(2));
             this.fixture.Logger.LogInformation("Reentrancy NonReentrantGrain_WithMayInterleaveInstancedPredicate_WhenPredicateReturnsTrue Test finished OK.");
         }
 
@@ -117,10 +102,10 @@ namespace UnitTests
         public async Task NonReentrantGrain_WithMayInterleaveInstancedPredicate_WhenPredicateThrows()
         {
             var grain = this.fixture.GrainFactory.GetGrain<IMayInterleaveInstancedPredicateGrain>(GetRandomGrainId());
-            grain.SetSelf(grain).Wait();
+            await grain.SetSelf(grain);
             try
             {
-                await grain.Exceptional().WithTimeout(TimeSpan.FromSeconds(2));
+                await grain.Exceptional().WaitAsync(TimeSpan.FromSeconds(2));
             }
             catch (Exception ex)
             {
@@ -132,38 +117,38 @@ namespace UnitTests
         }
 
         [Fact, TestCategory("Functional"), TestCategory("Tasks"), TestCategory("Reentrancy")]
-        public void Reentrancy_Deadlock_1()
+        public async Task Reentrancy_Deadlock_1()
         {
             List<Task> done = new List<Task>();
             var grain1 = this.fixture.GrainFactory.GetGrain<IReentrantSelfManagedGrain>(1);
-            grain1.SetDestination(2).Wait();
+            await grain1.SetDestination(2);
             done.Add(grain1.Ping(15));
 
             var grain2 = this.fixture.GrainFactory.GetGrain<IReentrantSelfManagedGrain>(2);
-            grain2.SetDestination(1).Wait();
+            await grain2.SetDestination(1);
             done.Add(grain2.Ping(15));
 
-            Task.WhenAll(done).Wait();
+            await Task.WhenAll(done);
             this.fixture.Logger.LogInformation("ReentrancyTest_Deadlock_1 OK - no deadlock.");
         }
 
         // TODO: [Fact, TestCategory("Functional"), TestCategory("Tasks"), TestCategory("Reentrancy")]
         [Fact(Skip = "Ignore"), TestCategory("Failures"), TestCategory("Tasks"), TestCategory("Reentrancy")]
-        public void Reentrancy_Deadlock_2()
+        public async Task Reentrancy_Deadlock_2()
         {
             List<Task> done = new List<Task>();
             var grain1 = this.fixture.GrainFactory.GetGrain<INonReentrantSelfManagedGrain>(1);
-            grain1.SetDestination(2).Wait();
+            await grain1.SetDestination(2);
 
             var grain2 = this.fixture.GrainFactory.GetGrain<INonReentrantSelfManagedGrain>(2);
-            grain2.SetDestination(1).Wait();
+            await grain2.SetDestination(1);
 
             this.fixture.Logger.LogInformation("ReentrancyTest_Deadlock_2 is about to call grain1.Ping()");
             done.Add(grain1.Ping(15));
             this.fixture.Logger.LogInformation("ReentrancyTest_Deadlock_2 is about to call grain2.Ping()");
             done.Add(grain2.Ping(15));
 
-            Task.WhenAll(done).Wait();
+            await Task.WhenAll(done);
             this.fixture.Logger.LogInformation("ReentrancyTest_Deadlock_2 OK - no deadlock.");
         }
 
@@ -229,39 +214,39 @@ namespace UnitTests
         }
 
         [Fact, TestCategory("Stress"), TestCategory("Functional"), TestCategory("Tasks"), TestCategory("Reentrancy")]
-        public void FanOut_Task_Stress_Reentrant()
+        public async Task FanOut_Task_Stress_Reentrant()
         {
             const int numLoops = 5;
             const int blockSize = 10;
             TimeSpan timeout = TimeSpan.FromSeconds(40);
-            Do_FanOut_Stress(numLoops, blockSize, timeout, false, false);
+            await Do_FanOut_Stress(numLoops, blockSize, timeout, false, false);
         }
 
         [Fact, TestCategory("Stress"), TestCategory("Functional"), TestCategory("Tasks"), TestCategory("Reentrancy")]
-        public void FanOut_Task_Stress_NonReentrant()
+        public async Task FanOut_Task_Stress_NonReentrant()
         {
             const int numLoops = 5;
             const int blockSize = 10;
             TimeSpan timeout = TimeSpan.FromSeconds(40);
-            Do_FanOut_Stress(numLoops, blockSize, timeout, true, false);
+            await Do_FanOut_Stress(numLoops, blockSize, timeout, true, false);
         }
 
         [Fact, TestCategory("Stress"), TestCategory("Functional"), TestCategory("Tasks"), TestCategory("Reentrancy")]
-        public void FanOut_AC_Stress_Reentrant()
+        public async Task FanOut_AC_Stress_Reentrant()
         {
             const int numLoops = 5;
             const int blockSize = 10;
             TimeSpan timeout = TimeSpan.FromSeconds(40);
-            Do_FanOut_Stress(numLoops, blockSize, timeout, false, true);
+            await Do_FanOut_Stress(numLoops, blockSize, timeout, false, true);
         }
 
         [Fact, TestCategory("Stress"), TestCategory("Functional"), TestCategory("Tasks"), TestCategory("Reentrancy")]
-        public void FanOut_AC_Stress_NonReentrant()
+        public async Task FanOut_AC_Stress_NonReentrant()
         {
             const int numLoops = 5;
             const int blockSize = 10;
             TimeSpan timeout = TimeSpan.FromSeconds(40);
-            Do_FanOut_Stress(numLoops, blockSize, timeout, true, true);
+            await Do_FanOut_Stress(numLoops, blockSize, timeout, true, true);
         }
 
         // ---------- Utility methods ----------
@@ -328,7 +313,7 @@ namespace UnitTests
 
         private readonly TimeSpan MaxStressExecutionTime = TimeSpan.FromMinutes(2);
 
-        private void Do_FanOut_Stress(int numLoops, int blockSize, TimeSpan timeout,
+        private async Task Do_FanOut_Stress(int numLoops, int blockSize, TimeSpan timeout,
             bool doNonReentrant, bool doAC)
         {
             Stopwatch totalTime = Stopwatch.StartNew();
@@ -349,8 +334,7 @@ namespace UnitTests
                     });
                     promises.Add(promise);
                     output.WriteLine("Inner loop {0} - Created Tasks. Elapsed={1}", j, innerClock.Elapsed);
-                    bool ok = Task.WhenAll(promises).Wait(timeout);
-                    if (!ok) throw new TimeoutException();
+                    await Task.WhenAll(promises).WaitAsync(timeout);
                     output.WriteLine("Inner loop {0} - Finished Join. Elapsed={1}", j, innerClock.Elapsed);
                     promises.Clear();
                 }

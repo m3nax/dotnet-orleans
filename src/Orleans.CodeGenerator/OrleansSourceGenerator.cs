@@ -1,11 +1,13 @@
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Text;
-using Orleans.CodeGenerator.Diagnostics;
 using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Text;
+using Orleans.CodeGenerator.Diagnostics;
 
+#pragma warning disable RS1035 // Do not use APIs banned for analyzers
 namespace Orleans.CodeGenerator
 {
     [Generator]
@@ -21,7 +23,8 @@ namespace Orleans.CodeGenerator
                     return;
                 }
 
-                if (context.AnalyzerConfigOptions.GlobalOptions.TryGetValue("build_property.orleans_designtimebuild", out var isDesignTimeBuild)
+                if (!Debugger.IsAttached &&
+                    context.AnalyzerConfigOptions.GlobalOptions.TryGetValue("build_property.orleans_designtimebuild", out var isDesignTimeBuild)
                     && string.Equals("true", isDesignTimeBuild, StringComparison.OrdinalIgnoreCase))
                 {
                     return;
@@ -57,7 +60,15 @@ namespace Orleans.CodeGenerator
                 if (context.AnalyzerConfigOptions.GlobalOptions.TryGetValue("build_property.orleans_generatefieldids", out var generateFieldIds) && generateFieldIds is { Length: > 0 })
                 {
                     if (Enum.TryParse(generateFieldIds, out GenerateFieldIds fieldIdOption))
+                    {
                         options.GenerateFieldIds = fieldIdOption;
+                    }
+                }
+
+                if (context.AnalyzerConfigOptions.GlobalOptions.TryGetValue("build_property.orleansgeneratecompatibilityinvokers", out var generateCompatInvokersValue)
+                    && bool.TryParse(generateCompatInvokersValue, out var genCompatInvokers))
+                {
+                    options.GenerateCompatibilityInvokers = genCompatInvokers;
                 }
 
                 var codeGenerator = new CodeGenerator(context.Compilation, options);
@@ -66,8 +77,12 @@ namespace Orleans.CodeGenerator
                 var sourceText = SourceText.From(sourceString, Encoding.UTF8);
                 context.AddSource($"{context.Compilation.AssemblyName ?? "assembly"}.orleans.g.cs", sourceText);
             }
-            catch (Exception exception) when (HandleException(context, exception))
+            catch (Exception exception)
             {
+                if (!HandleException(context, exception))
+                {
+                    throw;
+                }
             }
 
             static bool HandleException(GeneratorExecutionContext context, Exception exception)
@@ -79,6 +94,8 @@ namespace Orleans.CodeGenerator
                 }
 
                 context.ReportDiagnostic(UnhandledCodeGenerationExceptionDiagnostic.CreateDiagnostic(exception));
+                Console.WriteLine(exception);
+                Console.WriteLine(exception.StackTrace);
                 return false;
             }
         }
@@ -88,3 +105,4 @@ namespace Orleans.CodeGenerator
         }
     }
 }
+#pragma warning restore RS1035 // Do not use APIs banned for analyzers

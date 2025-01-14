@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -67,7 +68,7 @@ namespace Orleans.Runtime.Placement
         /// </summary>
         public Task AddressMessage(Message message)
         {
-            if (message.IsFullyAddressed) return Task.CompletedTask;
+            if (message.IsTargetFullyAddressed) return Task.CompletedTask;
             if (message.TargetGrain.IsDefault) ThrowMissingAddress();
 
             var grainId = message.TargetGrain;
@@ -84,7 +85,7 @@ namespace Orleans.Runtime.Placement
 
             if (_logger.IsEnabled(LogLevel.Debug))
             {
-                _logger.LogDebug("Placing grain {GrainId} for message {Message}", grainId, message);
+                _logger.LogDebug("Looking up address for grain {GrainId} for message {Message}", grainId, message);
             }
 
             var worker = _workers[grainId.GetUniformHashCode() % PlacementWorkerCount];
@@ -125,7 +126,7 @@ namespace Orleans.Runtime.Placement
                 throw new OrleansException(
                     $"No active nodes are compatible with grain {grainType} and interface {target.InterfaceType} version {target.InterfaceVersion}. "
                     + $"Known nodes with grain type: {allWithTypeString}. "
-                    + $"All known nodes compatible with interface version: {allWithTypeString}");
+                    + $"All known nodes compatible with interface version: {allWithInterfaceString}");
             }
 
             return compatibleSilos;
@@ -164,24 +165,31 @@ namespace Orleans.Runtime.Placement
             // Verify that the result from the cache has not been invalidated by the message being addressed.
             return message.CacheInvalidationHeader switch
             {
-                { Count: > 0 } invalidAddresses => CachedAddressIsValidCore(message, cachedAddress, invalidAddresses),
+                { Count: > 0 } cacheUpdates => CachedAddressIsValidCore(message, cachedAddress, cacheUpdates),
                 _ => true
             };
 
             [MethodImpl(MethodImplOptions.NoInlining)]
-            bool CachedAddressIsValidCore(Message message, GrainAddress cachedAddress, List<GrainAddress> invalidAddresses)
+            bool CachedAddressIsValidCore(Message message, GrainAddress cachedAddress, List<GrainAddressCacheUpdate> cacheUpdates)
             {
                 var resultIsValid = true;
                 if (_logger.IsEnabled(LogLevel.Debug))
                 {
-                    _logger.LogDebug("Invalidating {Count} cached entries for message {Message}", invalidAddresses.Count, message);
+                    _logger.LogDebug("Invalidating {Count} cached entries for message {Message}", cacheUpdates.Count, message);
                 }
 
-                foreach (var address in invalidAddresses)
+                foreach (var update in cacheUpdates)
                 {
-                    // Invalidate the cache entries while we are examining them.
-                    _grainLocator.InvalidateCache(address);
-                    if (cachedAddress.Matches(address))
+                    // Invalidate/update cache entries while we are examining them.
+                    var invalidAddress = update.InvalidGrainAddress;
+                    var validAddress = update.ValidGrainAddress;
+                    _grainLocator.UpdateCache(update);
+
+                    if (cachedAddress.Matches(validAddress))
+                    {
+                        resultIsValid = true;
+                    }
+                    else if (cachedAddress.Matches(invalidAddress))
                     {
                         resultIsValid = false;
                     }
@@ -208,7 +216,7 @@ namespace Orleans.Runtime.Placement
         private class PlacementWorker
         {
             private readonly Dictionary<GrainId, GrainPlacementWorkItem> _inProgress = new();
-            private readonly SingleWaiterAutoResetEvent _workSignal = new();
+            private readonly SingleWaiterAutoResetEvent _workSignal = new() { RunContinuationsAsynchronously = true };
             private readonly ILogger _logger;
 #pragma warning disable IDE0052 // Remove unread private members. Justification: retained for debugging purposes
             private readonly Task _processLoopTask;
@@ -268,11 +276,7 @@ namespace Orleans.Runtime.Placement
                             foreach (var message in messages)
                             {
                                 var target = message.Message.TargetGrain;
-                                if (!_inProgress.TryGetValue(target, out var workItem))
-                                {
-                                    _inProgress[target] = workItem = new();
-                                }
-
+                                var workItem = GetOrAddWorkItem(target);
                                 workItem.Messages.Add(message);
                                 if (workItem.Result is null)
                                 {
@@ -301,10 +305,17 @@ namespace Orleans.Runtime.Placement
                     }
                     catch (Exception exception)
                     {
-                        _logger.LogWarning(exception, "Exception in placement worker");
+                        _logger.LogWarning(exception, "Error in placement worker.");
                     }
 
                     await _workSignal.WaitAsync();
+                }
+
+                GrainPlacementWorkItem GetOrAddWorkItem(GrainId target)
+                {
+                    ref var workItem = ref CollectionsMarshal.GetValueRefOrAddDefault(_inProgress, target, out _);
+                    workItem ??= new();
+                    return workItem;
                 }
             }
 
@@ -371,7 +382,7 @@ namespace Orleans.Runtime.Placement
                 }
 
                 _placementService._grainLocator.InvalidateCache(targetGrain);
-                _placementService._grainLocator.CachePlacementDecision(targetGrain, siloAddress);
+                _placementService._grainLocator.UpdateCache(targetGrain, siloAddress);
                 return siloAddress;
             }
 

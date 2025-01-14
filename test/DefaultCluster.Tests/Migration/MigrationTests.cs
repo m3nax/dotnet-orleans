@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Orleans.Core.Internal;
 using Orleans.Runtime;
 using Orleans.Runtime.Placement;
@@ -42,6 +43,38 @@ namespace DefaultCluster.Tests.General
         }
 
         /// <summary>
+        /// Tests that migration can be initiated from within the grain's <see cref="IGrainBase.OnDeactivateAsync(DeactivationReason, CancellationToken)"/> implementation.
+        /// </summary>
+        [Fact, TestCategory("BVT")]
+        public async Task InitiateMigrationFromOnDeactivateAsyncTest()
+        {
+            for (var i = 1; i < 100; ++i)
+            {
+                var grain = GrainFactory.GetGrain<IMigrationTestGrain>(GetRandomGrainId());
+                var expectedState = Random.Shared.Next();
+                await grain.SetState(expectedState);
+                var originalAddress = await grain.GetGrainAddress();
+                var originalHost = originalAddress.SiloAddress;
+                var targetHost = Fixture.HostedCluster.GetActiveSilos().Select(s => s.SiloAddress).First(address => address != originalHost);
+
+                // Trigger deactivation and tell the grain that it should migrate to the target host on deactivation.
+                await grain.MigrateDuringDeactivation(targetHost);
+
+                GrainAddress newAddress;
+                do
+                {
+                    newAddress = await grain.GetGrainAddress();
+                } while (newAddress.ActivationId == originalAddress.ActivationId);
+
+                var newHost = newAddress.SiloAddress;
+                Assert.Equal(targetHost, newHost);
+
+                var newState = await grain.GetState();
+                Assert.Equal(expectedState, newState);
+            }
+        }
+
+        /// <summary>
         /// Tests that grain migration works for a simple grain which directly implements <see cref="IGrainMigrationParticipant"/>.
         /// The test specifies an alternative location for the grain to migrate to and asserts that it migrates to that location.
         /// </summary>
@@ -72,6 +105,61 @@ namespace DefaultCluster.Tests.General
 
                 var newState = await grain.GetState();
                 Assert.Equal(expectedState, newState);
+            }
+        }
+
+        /// <summary>
+        /// Tests that multiple grains can be migrated simultaneously.
+        /// </summary>
+        [Fact, TestCategory("BVT")]
+        public async Task MultiGrainDirectedMigrationTest()
+        {
+            var baseId = GetRandomGrainId();
+            for (var i = 1; i < 100; ++i)
+            {
+                var a = GrainFactory.GetGrain<IMigrationTestGrain>(baseId + 2 * i);
+                var expectedState = Random.Shared.Next();
+                await a.SetState(expectedState);
+                var originalAddressA = await a.GetGrainAddress();
+                var originalHostA = originalAddressA.SiloAddress;
+
+                RequestContext.Set(IPlacementDirector.PlacementHintKey, originalHostA);
+                var b = GrainFactory.GetGrain<IMigrationTestGrain>(baseId + 1 + 2 * i);
+                await b.SetState(expectedState);
+                var originalAddressB = await b.GetGrainAddress();
+                Assert.Equal(originalHostA, originalAddressB.SiloAddress);
+
+                var targetHost = Fixture.HostedCluster.GetActiveSilos().Select(s => s.SiloAddress).First(address => address != originalHostA);
+
+                // Trigger migration, setting a placement hint to coerce the placement director to use the target silo
+                RequestContext.Set(IPlacementDirector.PlacementHintKey, targetHost);
+                var migrateA = a.Cast<IGrainManagementExtension>().MigrateOnIdle();
+                var migrateB = b.Cast<IGrainManagementExtension>().MigrateOnIdle();
+                await migrateA;
+                await migrateB;
+
+                while (true)
+                {
+                    var newAddress = await a.GetGrainAddress();
+                    if (newAddress.ActivationId != originalAddressA.ActivationId)
+                    {
+                        Assert.Equal(targetHost, newAddress.SiloAddress);
+                        break;
+                    }
+                }
+
+                while (true)
+                {
+                    var newAddress = await b.GetGrainAddress();
+                    if (newAddress.ActivationId != originalAddressB.ActivationId)
+                    {
+                        Assert.Equal(targetHost, newAddress.SiloAddress);
+                        break;
+                    }
+                }
+
+                Assert.Equal(expectedState, await a.GetState());
+                Assert.Equal(expectedState, await b.GetState());
             }
         }
 
@@ -203,11 +291,13 @@ namespace DefaultCluster.Tests.General
         ValueTask<GrainAddress> GetGrainAddress();
         ValueTask SetState(int state);
         ValueTask<int> GetState();
+        ValueTask MigrateDuringDeactivation(SiloAddress targetHost);
     }
 
     public class MigrationTestGrain : Grain, IMigrationTestGrain, IGrainMigrationParticipant
     {
         private int _state;
+        private SiloAddress _migrateDuringDeactivationTargetHost;
         public ValueTask<int> GetState() => new(_state);
 
         public ValueTask SetState(int state)
@@ -246,6 +336,23 @@ namespace DefaultCluster.Tests.General
         }
 
         public ValueTask<GrainAddress> GetGrainAddress() => new(GrainContext.Address);
+        public ValueTask MigrateDuringDeactivation(SiloAddress targetHost)
+        {
+            _migrateDuringDeactivationTargetHost = targetHost;
+            this.DeactivateOnIdle();
+            return ValueTask.CompletedTask;
+        }
+
+        public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
+        {
+            if (reason.ReasonCode is DeactivationReasonCode.ApplicationRequested && _migrateDuringDeactivationTargetHost is not null)
+            {
+                RequestContext.Set(IPlacementDirector.PlacementHintKey, _migrateDuringDeactivationTargetHost);
+                this.MigrateOnIdle();
+            }
+
+            return base.OnDeactivateAsync(reason, cancellationToken);
+        }
     }
 
     public interface IMigrationTestGrain_GrainOfT : IGrainWithIntegerKey
