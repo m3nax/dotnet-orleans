@@ -40,7 +40,7 @@ public class ReminderTests_EFCoreSqlServer_Standalone
     public async Task Reminders_AzureTable_InsertRate()
     {
         IReminderTable table = this.GetReminderTable("TMSLocalTesting");
-        await table.Init();
+        await table.StartAsync();
 
         await TestTableInsertRate(table, 10);
         await TestTableInsertRate(table, 500);
@@ -51,7 +51,7 @@ public class ReminderTests_EFCoreSqlServer_Standalone
     {
         var clusterId = NewClusterId();
         IReminderTable table = this.GetReminderTable(clusterId);
-        await table.Init();
+        await table.StartAsync();
 
         ReminderEntry[] rows = (await GetAllRows(table)).ToArray();
         Assert.Empty(rows); // "The reminder table (sid={0}, did={1}) was not empty.", ServiceId, clusterId);
