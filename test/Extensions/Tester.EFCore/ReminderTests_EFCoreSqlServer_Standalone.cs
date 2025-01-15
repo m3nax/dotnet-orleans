@@ -3,11 +3,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Orleans.Configuration;
-using Orleans.Internal;
 using Orleans.Reminders;
 using Orleans.Reminders.EntityFrameworkCore.SqlServer.Data;
-using Orleans.Runtime;
 using Orleans.TestingHost.Utils;
+using Tester.EFCore.Utility;
 using TestExtensions;
 using Xunit.Abstractions;
 

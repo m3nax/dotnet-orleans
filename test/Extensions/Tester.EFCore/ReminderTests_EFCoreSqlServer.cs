@@ -1,9 +1,8 @@
 using Microsoft.Extensions.Logging;
-using Orleans.Runtime;
-using Orleans.Internal;
 using Orleans.Reminders.EntityFrameworkCore.SqlServer.Data;
-using UnitTests.TimerTests;
+using Tester.EFCore.Utility;
 using UnitTests.GrainInterfaces;
+using UnitTests.TimerTests;
 
 namespace Tester.EFCore;
 
@@ -107,7 +106,7 @@ public class ReminderTests_EFCoreSqlServer : ReminderTests_Base, IClassFixture<E
 
         var period = await g1.GetReminderPeriod(DR);
 
-        Task<bool>[] tasks = {Task.Run(() => PerGrainMultiReminderTestChurn(g1)), Task.Run(() => PerGrainMultiReminderTestChurn(g2)), Task.Run(() => PerGrainMultiReminderTestChurn(g3)), Task.Run(() => PerGrainMultiReminderTestChurn(g4)), Task.Run(() => PerGrainMultiReminderTestChurn(g5)),};
+        Task<bool>[] tasks = { Task.Run(() => PerGrainMultiReminderTestChurn(g1)), Task.Run(() => PerGrainMultiReminderTestChurn(g2)), Task.Run(() => PerGrainMultiReminderTestChurn(g3)), Task.Run(() => PerGrainMultiReminderTestChurn(g4)), Task.Run(() => PerGrainMultiReminderTestChurn(g5)), };
 
         await Task.Delay(period.Multiply(5));
 
@@ -130,7 +129,7 @@ public class ReminderTests_EFCoreSqlServer : ReminderTests_Base, IClassFixture<E
         var g4 = GrainFactory.GetGrain<IReminderTestGrain2>(Guid.NewGuid());
         var g5 = GrainFactory.GetGrain<IReminderTestGrain2>(Guid.NewGuid());
 
-        Task<bool>[] tasks = {Task.Run(() => PerGrainMultiReminderTest(g1)), Task.Run(() => PerGrainMultiReminderTest(g2)), Task.Run(() => PerGrainMultiReminderTest(g3)), Task.Run(() => PerGrainMultiReminderTest(g4)), Task.Run(() => PerGrainMultiReminderTest(g5)),};
+        Task<bool>[] tasks = { Task.Run(() => PerGrainMultiReminderTest(g1)), Task.Run(() => PerGrainMultiReminderTest(g2)), Task.Run(() => PerGrainMultiReminderTest(g3)), Task.Run(() => PerGrainMultiReminderTest(g4)), Task.Run(() => PerGrainMultiReminderTest(g5)), };
 
         //Block until all tasks complete.
         await Task.WhenAll(tasks).WithTimeout(ENDWAIT);
@@ -170,7 +169,7 @@ public class ReminderTests_EFCoreSqlServer : ReminderTests_Base, IClassFixture<E
 
         var period = await g1.GetReminderPeriod(DR);
 
-        Task[] tasks = {Task.Run(() => PerGrainFailureTest(g1)), Task.Run(() => PerGrainFailureTest(g2)), Task.Run(() => PerGrainFailureTest(g3)), Task.Run(() => PerGrainFailureTest(g4)), Task.Run(() => PerGrainFailureTest(g5)),};
+        Task[] tasks = { Task.Run(() => PerGrainFailureTest(g1)), Task.Run(() => PerGrainFailureTest(g2)), Task.Run(() => PerGrainFailureTest(g3)), Task.Run(() => PerGrainFailureTest(g4)), Task.Run(() => PerGrainFailureTest(g5)), };
 
         Thread.Sleep(period.Multiply(failAfter));
 
@@ -198,7 +197,7 @@ public class ReminderTests_EFCoreSqlServer : ReminderTests_Base, IClassFixture<E
 
         var period = await g1.GetReminderPeriod(DR);
 
-        Task[] tasks = {Task.Run(() => PerGrainFailureTest(g1)), Task.Run(() => PerGrainFailureTest(g2)), Task.Run(() => PerGrainFailureTest(g3)), Task.Run(() => PerGrainFailureTest(g4)), Task.Run(() => PerGrainFailureTest(g5)),};
+        Task[] tasks = { Task.Run(() => PerGrainFailureTest(g1)), Task.Run(() => PerGrainFailureTest(g2)), Task.Run(() => PerGrainFailureTest(g3)), Task.Run(() => PerGrainFailureTest(g4)), Task.Run(() => PerGrainFailureTest(g5)), };
 
         Thread.Sleep(period.Multiply(failAfter));
 
@@ -210,7 +209,7 @@ public class ReminderTests_EFCoreSqlServer : ReminderTests_Base, IClassFixture<E
         {
             t.GetAwaiter().GetResult();
         });
-        await Task.WhenAll(new[] {t1, t2}).WithTimeout(ENDWAIT);
+        await Task.WhenAll(new[] { t1, t2 }).WithTimeout(ENDWAIT);
 
         await Task.WhenAll(tasks).WithTimeout(ENDWAIT); // Block until all tasks complete.
         log.LogInformation("\n\n\nReminderTest_1F1J_MultiGrain passed OK.\n\n\n");
@@ -222,7 +221,7 @@ public class ReminderTests_EFCoreSqlServer : ReminderTests_Base, IClassFixture<E
         var grain = GrainFactory.GetGrain<IReminderTestGrain2>(Guid.NewGuid());
         var promise1 = grain.StartReminder(DR);
         var promise2 = grain.StartReminder(DR);
-        Task<IGrainReminder>[] tasks = {promise1, promise2};
+        Task<IGrainReminder>[] tasks = { promise1, promise2 };
         await Task.WhenAll(tasks).WithTimeout(TimeSpan.FromSeconds(15));
         //Assert.NotEqual(promise1.Result, promise2.Result);
         // TODO: write tests where period of a reminder is changed
@@ -266,7 +265,7 @@ public class ReminderTests_EFCoreSqlServer : ReminderTests_Base, IClassFixture<E
 
         var period = await g1.GetReminderPeriod(DR);
 
-        Task[] tasks = {Task.Run(() => PerGrainFailureTest(g1)), Task.Run(() => PerGrainFailureTest(g2)), Task.Run(() => PerCopyGrainFailureTest(g3)), Task.Run(() => PerCopyGrainFailureTest(g4)),};
+        Task[] tasks = { Task.Run(() => PerGrainFailureTest(g1)), Task.Run(() => PerGrainFailureTest(g2)), Task.Run(() => PerCopyGrainFailureTest(g3)), Task.Run(() => PerCopyGrainFailureTest(g4)), };
 
         Thread.Sleep(period.Multiply(failAfter));
 
@@ -275,7 +274,7 @@ public class ReminderTests_EFCoreSqlServer : ReminderTests_Base, IClassFixture<E
         log.LogInformation("Stopping a silo and joining a silo");
         var t1 = Task.Run(async () => await HostedCluster.StopSiloAsync(siloToKill));
         Task t2 = Task.Run(async () => await HostedCluster.StartAdditionalSilosAsync(1));
-        await Task.WhenAll(new[] {t1, t2}).WithTimeout(ENDWAIT);
+        await Task.WhenAll(new[] { t1, t2 }).WithTimeout(ENDWAIT);
 
         await Task.WhenAll(tasks).WithTimeout(ENDWAIT); // Block until all tasks complete.
     }
