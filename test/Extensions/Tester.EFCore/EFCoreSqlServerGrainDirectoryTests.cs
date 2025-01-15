@@ -4,7 +4,6 @@ using Microsoft.Extensions.Options;
 using Orleans.Configuration;
 using Orleans.GrainDirectory;
 using Orleans.GrainDirectory.EntityFrameworkCore.SqlServer.Data;
-using Orleans.Runtime;
 using Orleans.TestingHost.Utils;
 using Tester.Directories;
 using Xunit.Abstractions;
@@ -18,7 +17,7 @@ public class EFCoreSqlServerGrainDirectoryTests : GrainDirectoryTests<EFCoreGrai
     {
     }
 
-    protected override EFCoreGrainDirectory<SqlServerGrainDirectoryDbContext, byte[]> GetGrainDirectory()
+    protected override EFCoreGrainDirectory<SqlServerGrainDirectoryDbContext, byte[]> CreateGrainDirectory()
     {
         EFCoreTestUtils.CheckSqlServer();
 
@@ -59,53 +58,53 @@ public class EFCoreSqlServerGrainDirectoryTests : GrainDirectoryTests<EFCoreGrai
     }
 
     [SkippableFact]
-        public async Task UnregisterMany()
+    public async Task UnregisterMany()
+    {
+        const int N = 25;
+        const int R = 4;
+
+        // Create and insert N entries
+        var addresses = new List<GrainAddress>();
+        for (var i = 0; i < N; i++)
         {
-            const int N = 25;
-            const int R = 4;
-
-            // Create and insert N entries
-            var addresses = new List<GrainAddress>();
-            for (var i = 0; i < N; i++)
+            var addr = new GrainAddress
             {
-                var addr = new GrainAddress
-                {
-                    ActivationId = ActivationId.NewId(),
-                    GrainId = GrainId.Parse("user/someraondomuser_" + Guid.NewGuid().ToString("N")),
-                    SiloAddress = SiloAddress.FromParsableString("10.0.23.12:1000@5678"),
-                    MembershipVersion = new MembershipVersion(51)
-                };
-                addresses.Add(addr);
-                await this.grainDirectory.Register(addr, previousAddress: null);
-            }
-
-            // Modify the Rth entry locally, to simulate another activation tentative by another silo
-            var ra = addresses[R];
-            var oldActivation = ra.ActivationId;
-            addresses[R] = new()
-            {
-                GrainId = ra.GrainId,
-                SiloAddress = ra.SiloAddress,
-                MembershipVersion = ra.MembershipVersion,
-                ActivationId = ActivationId.NewId()
+                ActivationId = ActivationId.NewId(),
+                GrainId = GrainId.Parse("user/someraondomuser_" + Guid.NewGuid().ToString("N")),
+                SiloAddress = SiloAddress.FromParsableString("10.0.23.12:1000@5678"),
+                MembershipVersion = new MembershipVersion(51)
             };
+            addresses.Add(addr);
+            await this.GrainDirectory.Register(addr, previousAddress: null);
+        }
 
-            // Batch unregister
-            await this.grainDirectory.UnregisterMany(addresses);
+        // Modify the Rth entry locally, to simulate another activation tentative by another silo
+        var ra = addresses[R];
+        var oldActivation = ra.ActivationId;
+        addresses[R] = new()
+        {
+            GrainId = ra.GrainId,
+            SiloAddress = ra.SiloAddress,
+            MembershipVersion = ra.MembershipVersion,
+            ActivationId = ActivationId.NewId()
+        };
 
-            // Now we should only find the old Rth entry
-            for (int i = 0; i < N; i++)
+        // Batch unregister
+        await this.GrainDirectory.UnregisterMany(addresses);
+
+        // Now we should only find the old Rth entry
+        for (int i = 0; i < N; i++)
+        {
+            if (i == R)
             {
-                if (i == R)
-                {
-                    var addr = await this.grainDirectory.Lookup(addresses[i].GrainId);
-                    Assert.NotNull(addr);
-                    Assert.Equal(oldActivation, addr.ActivationId);
-                }
-                else
-                {
-                    Assert.Null(await this.grainDirectory.Lookup(addresses[i].GrainId));
-                }
+                var addr = await this.GrainDirectory.Lookup(addresses[i].GrainId);
+                Assert.NotNull(addr);
+                Assert.Equal(oldActivation, addr.ActivationId);
+            }
+            else
+            {
+                Assert.Null(await this.GrainDirectory.Lookup(addresses[i].GrainId));
             }
         }
+    }
 }

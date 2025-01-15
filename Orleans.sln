@@ -278,6 +278,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Orleans.Reminders.EntityFra
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Orleans.Reminders.EntityFrameworkCore.SqlServer", "src\EFCore\Orleans.Reminders.EntityFrameworkCore.SqlServer\Orleans.Reminders.EntityFrameworkCore.SqlServer.csproj", "{059D2987-0226-77D8-C5A8-A9BCC25B1402}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tester.EFCore", "test\Extensions\Tester.EFCore\Tester.EFCore.csproj", "{680EBF44-AF68-E0F1-E495-DA991891700B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -728,6 +730,10 @@ Global
 		{059D2987-0226-77D8-C5A8-A9BCC25B1402}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{059D2987-0226-77D8-C5A8-A9BCC25B1402}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{059D2987-0226-77D8-C5A8-A9BCC25B1402}.Release|Any CPU.Build.0 = Release|Any CPU
+		{680EBF44-AF68-E0F1-E495-DA991891700B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{680EBF44-AF68-E0F1-E495-DA991891700B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{680EBF44-AF68-E0F1-E495-DA991891700B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{680EBF44-AF68-E0F1-E495-DA991891700B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -862,6 +868,7 @@ Global
 		{58F55DC4-B36C-09D6-266F-32EEEE8094EF} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 		{3A5A50EB-038C-6EDB-60F5-FE3BCAE31F02} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 		{059D2987-0226-77D8-C5A8-A9BCC25B1402} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{680EBF44-AF68-E0F1-E495-DA991891700B} = {082D25DB-70CA-48F4-93E0-EC3455F494B8}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {7BFB3429-B5BB-4DB1-95B4-67D77A864952}
